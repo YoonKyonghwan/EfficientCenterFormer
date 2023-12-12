@@ -1,8 +1,6 @@
 from ..registry import DETECTORS
 from .single_stage import SingleStageDetector
-from det3d.torchie.trainer import load_checkpoint
 import torch 
-from copy import deepcopy
 from torch.cuda.amp import autocast as autocast
 
 import nvtx
@@ -37,7 +35,7 @@ class VoxelNet_dynamic(SingleStageDetector):
                     voxels=voxels
                 )
         
-        with nvtx.annotate("voxelization"):
+        with nvtx.annotate("3D_backbone"):
             x, voxel_feature = self.backbone(
                     data['voxels'], data["coors"], data["batch_size"], data["input_shape"]
                 )
@@ -49,9 +47,12 @@ class VoxelNet_dynamic(SingleStageDetector):
 
     # def forward(self, example, return_loss=True, **kwargs):
     def forward(self, example, return_loss=True):
+            
         x, _ = self.extract_feat(example)
-        preds = self.bbox_head(x)
-
+        
+        with nvtx.annotate("bbox_head"):
+            preds = self.bbox_head(x)
+                
         with nvtx.annotate("post_processing"):
             if return_loss:
                 return self.bbox_head.loss(example, preds, self.test_cfg)

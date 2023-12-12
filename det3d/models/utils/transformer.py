@@ -413,19 +413,18 @@ class Pooling(nn.Module):
     """
     def __init__(self, pool_size=3):
         super().__init__()
-        self.pool = nn.AvgPool2d(
-            pool_size, stride=1, padding=pool_size//2, count_include_pad=False)
-
+        self.pool = nn.AvgPool2d(pool_size, stride=1, padding=pool_size//2, count_include_pad=False)
+        # self.pool = nn.AvgPool2d(kernel_size=pool_size, stride=1)
+        # self.pool = nn.MaxPool2d(pool_size, stride=1, padding=1)
+        # self.pool = nn.MaxPool2d(kernel_size=3, stride=1, padding=1, dilation=1, ceil_mode=False)
+        
     def forward(self, x):
         return self.pool(x) - x
     
 
 
 class PoolFormerBlock(nn.Module):
-    def __init__(self, dim, pool_size=3, mlp_dim=256, 
-                 norm_layer=nn.LayerNorm, 
-                 drop=0.3):
-
+    def __init__(self, dim, pool_size=3, mlp_dim=256, norm_layer=nn.LayerNorm, drop=0.3):
         super().__init__()
 
         self.norm1 = norm_layer(dim)
@@ -438,6 +437,7 @@ class PoolFormerBlock(nn.Module):
 
     def forward(self, x):
         x = x + self.drop_path(self.token_mixer(self.norm1(x)))
+        # x = x + self.drop_path(self.mlp(self.norm1(x)))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     

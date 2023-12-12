@@ -312,7 +312,6 @@ class CenterHeadIoU_1d(nn.Module):
 
 
     @torch.no_grad()
-    @nvtx.annotate("post_processing")
     def predict(self, example, preds_dicts, test_cfg, **kwargs):
         """decode, nms, then return the detection result. Additionaly support double flip testing"""
         # get loss info
@@ -326,7 +325,7 @@ class CenterHeadIoU_1d(nn.Module):
                 dtype=preds_dicts[0]["scores"].dtype,
                 device=preds_dicts[0]["scores"].device,
             )
-
+        
         for task_id, preds_dict in enumerate(preds_dicts):
             # convert B C N to B N C
             for key, val in preds_dict.items():
@@ -348,10 +347,6 @@ class CenterHeadIoU_1d(nn.Module):
                 batch_iou = preds_dict["iou"].squeeze(2)
             else:
                 batch_iou = None
-            if "corner_hm" in preds_dict:
-                batch_corner_hm = preds_dict["corner_hm"]
-            else:
-                batch_corner_hm = None
 
             batch_dim = torch.exp(preds_dict["dim"])
 
@@ -364,13 +359,13 @@ class CenterHeadIoU_1d(nn.Module):
             if self.use_iou_loss:
                 batch_iou = (batch_iou + 1) * 0.5
                 batch_iou = torch.clamp(batch_iou, min=0.0, max=1.0)
-
+                
             batch, _, H, W = preds_dict["hm"].size()
-
             ys, xs = torch.meshgrid([torch.arange(0, H), torch.arange(0, W)])
+                
             ys = ys.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
             xs = xs.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
-
+            
             obj_num = preds_dict["order"].shape[1]
             batch_id = np.indices((batch, obj_num))[0]
             batch_id = torch.from_numpy(batch_id).to(preds_dict["order"])

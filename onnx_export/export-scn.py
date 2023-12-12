@@ -42,8 +42,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     model = SpMiddleResNetFHD(args.in_channel).cuda().eval().half()
-    # if args.use_quantization:
-    if False:
+    if args.use_quantization:
         # QAT training using the fusionBn mode, so loading the checkpoint needs to be followed by the fusion operation
         quant_sparseconv_module(model)
         quant_add_module(model)
