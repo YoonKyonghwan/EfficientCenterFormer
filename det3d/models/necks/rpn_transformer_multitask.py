@@ -15,6 +15,7 @@ from ..registry import NECKS
 from ..utils import build_norm_layer
 
 import nvtx
+import tensorrt as trt
 
 
 class ChannelAttention(nn.Module):
@@ -798,101 +799,21 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         if self.parametric_embedding:
             self.query_embed = nn.Embedding(self.obj_num * len(self.tasks), self._num_filters[-1] * 2)
             nn.init.uniform_(self.query_embed.weight, -1.0, 1.0)
+            
+        # for centerFinder
+        def load_engine(engine_filepath, trt_logger):
+            with open(engine_filepath, "rb") as f, trt.Runtime(trt_logger) as runtime:
+                engine = runtime.deserialize_cuda_engine(f.read())
+            return engine
+
+        TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+        centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
+        self.centerFinder_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
+        self.centerFinder_context = self.centerFinder_engine.create_execution_context()
 
         logger.info("Finish RPN_transformer_deformable Initialization")
         
 
-    # def find_centers(self, x, example=None):
-    #     x = self.blocks[0](x)
-    #     x_down = self.blocks[1](x)
-    #     x_up = torch.cat([self.blocks[2](x_down), self.up(x)], dim=1)
-
-    #     order_list = []
-    #     out_dict_list = []
-    #     for idx, task in enumerate(self.tasks):
-    #         # heatmap head
-    #         hm = self.hm_heads[idx](x_up)
-
-    #         if self.corner and self.corner_heads[0].training:
-    #             corner_hm = self.corner_heads[idx](x_up)
-    #             corner_hm = torch.sigmoid(corner_hm)
-
-    #         # find top K center location
-    #         hm = torch.sigmoid(hm)
-    #         batch, num_cls, H, W = hm.size()
-
-    #         scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
-
-    #         if self.use_gt_training and self.hm_heads[0].training:
-    #             gt_inds = example["ind"][idx][:, (self.window_size // 2) :: self.window_size]
-    #             gt_masks = example["mask"][idx][
-    #                 :, (self.window_size // 2) :: self.window_size
-    #             ]
-    #             batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
-    #                 labels
-    #             )
-    #             scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
-    #             order = scores.sort(1, descending=True)[1]
-    #             order = order[:, : self.obj_num]
-    #             scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
-    #         else:
-    #             order = scores.sort(1, descending=True)[1]
-    #             order = order[:, : self.obj_num]
-    #             # scores = scores.detach().cpu().numpy()
-    #             # order = np.argsort(-scores, axis=1)[:, : self.obj_num]
-    #             # order = torch.from_numpy(order).to(labels.device)
-    #             # scores = torch.from_numpy(scores).to(labels.device)
-                
-
-    #         scores = torch.gather(scores, 1, order)
-    #         labels = torch.gather(labels, 1, order)
-    #         mask = scores > self.score_threshold
-    #         order_list.append(order)
-
-    #         out_dict = {}
-    #         out_dict.update(
-    #             {
-    #                 "hm": hm,
-    #                 "scores": scores,
-    #                 "labels": labels,
-    #                 "order": order,
-    #                 "mask": mask,
-    #                 "BEV_feat": x_up,
-    #                 "H": H,
-    #                 "W": W,
-    #             }
-    #         )
-    #         if self.corner and self.corner_heads[0].training:
-    #             out_dict.update({"corner_hm": corner_hm})
-    #         out_dict_list.append(out_dict)
-
-    #     self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num * len(self.tasks)))[0]).to(labels)
-    #     order_all = torch.cat(order_list,dim=1)
-
-    #     ct_feat = (
-    #         x_up.reshape(batch, -1, H * W)
-    #         .transpose(2, 1)
-    #         .contiguous()[self.batch_id, order_all]
-    #     )  # B, 500, C
-
-        
-    #     y_coor = order_all // W
-    #     x_coor = order_all - y_coor * W
-    #     y_coor, x_coor = y_coor.to(ct_feat), x_coor.to(ct_feat)
-    #     y_coor, x_coor = y_coor / H, x_coor / W
-    #     pos_features = torch.stack([x_coor, y_coor], dim=2)
-        
-    #     if len(self.tasks) > 1:
-    #         # print((self.generate_tensor(len(self.tasks), batch, self.obj_num) == torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1)).all())
-    #         # task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
-    #         task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num, pos_features.device)
-    #         pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
-
-    #     if self.pos_embedding is not None:
-    #         center_pos_embedding = self.pos_embedding(pos_features)
-        
-    #     return ct_feat, center_pos_embedding, out_dict_list
-    
     def find_centers(self, x, example=None):
         x = self.blocks[0](x)
         x_down = self.blocks[1](x)
@@ -941,28 +862,18 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             order_list.append(order)
 
             out_dict = {}
-            if self.use_gt_training and self.hm_heads[0].training:
-                out_dict.update(
-                    {
-                        "hm": hm,
-                        "scores": scores,
-                        "labels": labels,
-                        "order": order,
-                        "mask": mask,
-                        "BEV_feat": x_up
-                    }
-                )
-            else:
-                out_dict.update(
-                    {
-                        "scores": scores,
-                        "labels": labels,
-                        "order": order,
-                        "mask": mask,
-                    }
-                )
-
-                
+            out_dict.update(
+                {
+                    "hm": hm,
+                    "scores": scores,
+                    "labels": labels,
+                    "order": order,
+                    "mask": mask,
+                    "BEV_feat": x_up,
+                    "H": H,
+                    "W": W,
+                }
+            )
             if self.corner and self.corner_heads[0].training:
                 out_dict.update({"corner_hm": corner_hm})
             out_dict_list.append(out_dict)
@@ -986,13 +897,134 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         if len(self.tasks) > 1:
             # print((self.generate_tensor(len(self.tasks), batch, self.obj_num) == torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1)).all())
             # task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
-            task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num, pos_features.device)
+            task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num)
             pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
 
         if self.pos_embedding is not None:
             center_pos_embedding = self.pos_embedding(pos_features)
         
         return ct_feat, center_pos_embedding, out_dict_list
+    
+    def run_trt_engine(self, context, engine, tensors):
+        bindings = [None]*engine.num_bindings
+        for idx, binding in enumerate(engine):
+            tensor_name = engine.get_tensor_name(idx)
+            if engine.get_tensor_mode(binding)==trt.TensorIOMode.INPUT:
+                bindings[idx] = tensors['inputs'][tensor_name].data_ptr()
+                if context.get_tensor_shape(tensor_name):
+                    context.set_input_shape(tensor_name, tensors['inputs'][tensor_name].shape)
+            else:
+                bindings[idx] = tensors['outputs'][tensor_name].data_ptr()
+        context.execute_v2(bindings=bindings)
+    
+    
+    # def find_centers(self, x, example=None):
+    #     x = self.blocks[0](x)
+    #     x_down = self.blocks[1](x)
+    #     x_up = torch.cat([self.blocks[2](x_down), self.up(x)], dim=1)
+
+    #     order_list = []
+        
+    #     if self.hm_heads[0].training:
+    #         out_dict_list = []
+    #     else:
+    #         num_tasks = len(self.tasks)
+    #         batch = x.shape[0]
+    #         out_scores = torch.zeros((num_tasks, batch, self.obj_num), device=x.device) #score, labels, order, mask 
+    #         out_labels = torch.zeros((num_tasks, batch, self.obj_num), device=x.device) #score, labels, order, mask 
+    #         out_order = torch.zeros((num_tasks, batch, self.obj_num), device=x.device) #score, labels, order, mask 
+    #         out_mask = torch.zeros((num_tasks, batch, self.obj_num), device=x.device) #score, labels, order, mask 
+        
+    #     for idx, task in enumerate(self.tasks):
+    #         # heatmap head
+    #         hm = self.hm_heads[idx](x_up)
+
+    #         if self.corner and self.corner_heads[0].training:
+    #             corner_hm = self.corner_heads[idx](x_up)
+    #             corner_hm = torch.sigmoid(corner_hm)
+
+    #         # find top K center location
+    #         hm = torch.sigmoid(hm)
+    #         batch, num_cls, H, W = hm.size()
+
+    #         scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
+
+    #         if self.use_gt_training and self.hm_heads[0].training:
+    #             gt_inds = example["ind"][idx][:, (self.window_size // 2) :: self.window_size]
+    #             gt_masks = example["mask"][idx][
+    #                 :, (self.window_size // 2) :: self.window_size
+    #             ]
+    #             batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
+    #                 labels
+    #             )
+    #             scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
+    #             order = scores.sort(1, descending=True)[1]
+    #             order = order[:, : self.obj_num]
+    #             scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
+    #         else:
+    #             # order = scores.sort(1, descending=True)[1]
+    #             # order = order[:, : self.obj_num]
+    #             scores = scores.detach().cpu().numpy()
+    #             order = np.argsort(-scores, axis=1)[:, : self.obj_num]
+    #             order = torch.from_numpy(order).to(labels.device)
+    #             scores = torch.from_numpy(scores).to(labels.device)
+                
+
+    #         scores = torch.gather(scores, 1, order)
+    #         labels = torch.gather(labels, 1, order)
+    #         mask = scores > self.score_threshold
+    #         order_list.append(order)
+
+    #         out_dict = {}
+    #         if self.hm_heads[0].training:
+    #             out_dict.update(
+    #                 {
+    #                     "hm": hm,
+    #                     "scores": scores,
+    #                     "labels": labels,
+    #                     "order": order,
+    #                     "mask": mask,
+    #                     "BEV_feat": x_up
+    #                 }
+    #             )
+    #             if self.corner and self.corner_heads[0].training:
+    #                 out_dict.update({"corner_hm": corner_hm})
+    #             out_dict_list.append(out_dict)
+    #         else:
+    #             out_scores[idx] = scores
+    #             out_labels[idx] = labels
+    #             out_order[idx] = order
+    #             out_mask[idx] = mask 
+
+    #     self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num * len(self.tasks)))[0]).to(labels)
+    #     order_all = torch.cat(order_list,dim=1)
+
+    #     ct_feat = (
+    #         x_up.reshape(batch, -1, H * W)
+    #         .transpose(2, 1)
+    #         .contiguous()[self.batch_id, order_all]
+    #     )  # B, 500, C
+
+    #     y_coor = order_all // W
+    #     x_coor = order_all - y_coor * W
+    #     y_coor, x_coor = y_coor.to(ct_feat), x_coor.to(ct_feat)
+    #     y_coor, x_coor = y_coor / H, x_coor / W
+    #     pos_features = torch.stack([x_coor, y_coor], dim=2)
+        
+    #     if len(self.tasks) > 1:
+    #         # print((self.generate_tensor(len(self.tasks), batch, self.obj_num) == torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1)).all())
+    #         # task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
+    #         task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num)
+    #         task_ids = task_ids.type(torch.FloatTensor).to(pos_features.device)
+    #         pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
+
+    #     if self.pos_embedding is not None:
+    #         center_pos_embedding = self.pos_embedding(pos_features)
+        
+    #     if self.hm_heads[0].training:
+    #         return ct_feat, center_pos_embedding, out_dict_list
+    #     else:
+    #         return ct_feat, center_pos_embedding, out_scores, out_labels, out_order, out_mask
     
 
     def poolformer_forward(self, ct_feat, center_pos):
@@ -1005,19 +1037,67 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         return ct_feat
     
 
-    def generate_tensor(self, length, rows, repeat, to_device):
+    def generate_tensor(self, length, rows, repeat):
         # Create a tensor of shape (length * repeat,) with repeated values
         tensor_list = []
         for i in range(length):
             tensor_list.extend([i] * repeat)
         # Convert the list to a tensor and reshape to a single row
-        row_tensor = torch.tensor(tensor_list, device=to_device)
+        row_tensor = torch.tensor(tensor_list)
         # Stack the row tensor 'rows' times to create the final tensor
         final_tensor = torch.stack([row_tensor] * rows)
         return final_tensor
     
+    
+    # def forward(self, x, example=None):        
+    #     with nvtx.annotate("find_centers"):
+    #         ct_feat_tensor = torch.zeros((1, 3000, 256)).to("cuda")
+    #         center_pos_embedding_tensor = torch.zeros((1, 3000, 256)).to("cuda")
+    #         out_scores_tensor = torch.zeros((6, 1, 500)).to("cuda")
+    #         out_labels_tensor = torch.zeros((6, 1, 500)).to("cuda")
+    #         out_order_tensor = torch.zeros((6, 1, 500)).to("cuda")
+    #         out_mask_tensor = torch.zeros((6, 1, 500)).to("cuda")
+    #         IO_tensors = {
+    #             "inputs" :
+    #             {'input_tensor': x},
+    #             "outputs" :
+    #             {'ct_feat': ct_feat_tensor, 'center_pos_embedding': center_pos_embedding_tensor,
+    #             'out_scores': out_scores_tensor, 'out_labels': out_labels_tensor,
+    #             'out_order': out_order_tensor, 'out_mask': out_mask_tensor}
+    #         }
+    #         self.run_trt_engine(self.centerFinder_context, self.centerFinder_engine, IO_tensors)
+            
+    #     with nvtx.annotate("poolformer_forward"):
+    #         pf_output = self.poolformer_forward(ct_feat_tensor, center_pos_embedding_tensor)
+            
+    #         out_dict_list = []
+    #         for idx, task in enumerate(self.tasks):
+    #             dict = {'scores': out_scores_tensor[idx], 
+    #                     'labels': out_labels_tensor[idx],
+    #                     'order': out_order_tensor[idx],
+    #                     'mask': out_mask_tensor[idx],
+    #                     'ct_feat': pf_output[:, :, idx * self.obj_num : (idx+1) * self.obj_num]}
+    #             out_dict_list.append(dict)
+    #     return out_dict_list
+    
 
     def forward(self, x, example=None):        
+        # with nvtx.annotate("find_centers"):
+        #     ct_feat, center_pos_embedding, out_scores, out_labels, out_order, out_mask = self.find_centers(x, example)
+            
+        # with nvtx.annotate("poolformer_forward"):
+        #     ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
+            
+        #     out_dict_list = []
+        #     for idx, task in enumerate(self.tasks):
+        #         out_scores, out_labels, out_mask
+        #         dict = {'scores': out_scores[idx], 
+        #                 'labels': out_labels[idx],
+        #                 'order': out_order[idx],
+        #                 'mask': out_mask[idx],
+        #                 'ct_feat': ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]}
+        #         out_dict_list.append(dict)
+        
         with nvtx.annotate("find_centers"):
             ct_feat, center_pos_embedding, out_dict_list = self.find_centers(x, example)
             
@@ -1026,5 +1106,4 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             
             for idx, task in enumerate(self.tasks):
                 out_dict_list[idx]["ct_feat"] = ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
-        
         return out_dict_list
