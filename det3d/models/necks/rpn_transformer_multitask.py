@@ -802,6 +802,97 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         logger.info("Finish RPN_transformer_deformable Initialization")
         
 
+    # def find_centers(self, x, example=None):
+    #     x = self.blocks[0](x)
+    #     x_down = self.blocks[1](x)
+    #     x_up = torch.cat([self.blocks[2](x_down), self.up(x)], dim=1)
+
+    #     order_list = []
+    #     out_dict_list = []
+    #     for idx, task in enumerate(self.tasks):
+    #         # heatmap head
+    #         hm = self.hm_heads[idx](x_up)
+
+    #         if self.corner and self.corner_heads[0].training:
+    #             corner_hm = self.corner_heads[idx](x_up)
+    #             corner_hm = torch.sigmoid(corner_hm)
+
+    #         # find top K center location
+    #         hm = torch.sigmoid(hm)
+    #         batch, num_cls, H, W = hm.size()
+
+    #         scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
+
+    #         if self.use_gt_training and self.hm_heads[0].training:
+    #             gt_inds = example["ind"][idx][:, (self.window_size // 2) :: self.window_size]
+    #             gt_masks = example["mask"][idx][
+    #                 :, (self.window_size // 2) :: self.window_size
+    #             ]
+    #             batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
+    #                 labels
+    #             )
+    #             scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
+    #             order = scores.sort(1, descending=True)[1]
+    #             order = order[:, : self.obj_num]
+    #             scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
+    #         else:
+    #             order = scores.sort(1, descending=True)[1]
+    #             order = order[:, : self.obj_num]
+    #             # scores = scores.detach().cpu().numpy()
+    #             # order = np.argsort(-scores, axis=1)[:, : self.obj_num]
+    #             # order = torch.from_numpy(order).to(labels.device)
+    #             # scores = torch.from_numpy(scores).to(labels.device)
+                
+
+    #         scores = torch.gather(scores, 1, order)
+    #         labels = torch.gather(labels, 1, order)
+    #         mask = scores > self.score_threshold
+    #         order_list.append(order)
+
+    #         out_dict = {}
+    #         out_dict.update(
+    #             {
+    #                 "hm": hm,
+    #                 "scores": scores,
+    #                 "labels": labels,
+    #                 "order": order,
+    #                 "mask": mask,
+    #                 "BEV_feat": x_up,
+    #                 "H": H,
+    #                 "W": W,
+    #             }
+    #         )
+    #         if self.corner and self.corner_heads[0].training:
+    #             out_dict.update({"corner_hm": corner_hm})
+    #         out_dict_list.append(out_dict)
+
+    #     self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num * len(self.tasks)))[0]).to(labels)
+    #     order_all = torch.cat(order_list,dim=1)
+
+    #     ct_feat = (
+    #         x_up.reshape(batch, -1, H * W)
+    #         .transpose(2, 1)
+    #         .contiguous()[self.batch_id, order_all]
+    #     )  # B, 500, C
+
+        
+    #     y_coor = order_all // W
+    #     x_coor = order_all - y_coor * W
+    #     y_coor, x_coor = y_coor.to(ct_feat), x_coor.to(ct_feat)
+    #     y_coor, x_coor = y_coor / H, x_coor / W
+    #     pos_features = torch.stack([x_coor, y_coor], dim=2)
+        
+    #     if len(self.tasks) > 1:
+    #         # print((self.generate_tensor(len(self.tasks), batch, self.obj_num) == torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1)).all())
+    #         # task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
+    #         task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num, pos_features.device)
+    #         pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
+
+    #     if self.pos_embedding is not None:
+    #         center_pos_embedding = self.pos_embedding(pos_features)
+        
+    #     return ct_feat, center_pos_embedding, out_dict_list
+    
     def find_centers(self, x, example=None):
         x = self.blocks[0](x)
         x_down = self.blocks[1](x)
@@ -850,18 +941,28 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             order_list.append(order)
 
             out_dict = {}
-            out_dict.update(
-                {
-                    "hm": hm,
-                    "scores": scores,
-                    "labels": labels,
-                    "order": order,
-                    "mask": mask,
-                    "BEV_feat": x_up,
-                    "H": H,
-                    "W": W,
-                }
-            )
+            if self.use_gt_training and self.hm_heads[0].training:
+                out_dict.update(
+                    {
+                        "hm": hm,
+                        "scores": scores,
+                        "labels": labels,
+                        "order": order,
+                        "mask": mask,
+                        "BEV_feat": x_up
+                    }
+                )
+            else:
+                out_dict.update(
+                    {
+                        "scores": scores,
+                        "labels": labels,
+                        "order": order,
+                        "mask": mask,
+                    }
+                )
+
+                
             if self.corner and self.corner_heads[0].training:
                 out_dict.update({"corner_hm": corner_hm})
             out_dict_list.append(out_dict)
@@ -874,7 +975,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             .transpose(2, 1)
             .contiguous()[self.batch_id, order_all]
         )  # B, 500, C
-        
+
         
         y_coor = order_all // W
         x_coor = order_all - y_coor * W
@@ -892,15 +993,6 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             center_pos_embedding = self.pos_embedding(pos_features)
         
         return ct_feat, center_pos_embedding, out_dict_list
-        
-        # if len(self.tasks) > 1:
-        #     task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
-        #     pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
-
-        # if self.pos_embedding is not None:
-        #     center_pos_embedding = self.pos_embedding(pos_features)
-        
-        # return ct_feat, center_pos_embedding, out_dict_list
     
 
     def poolformer_forward(self, ct_feat, center_pos):
@@ -925,29 +1017,14 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         return final_tensor
     
 
-    def forward(self, x, example=None):
-        
-        # import pickle
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_input.pkl", 'wb') as handle:
-        #     pickle.dump(x, handle)
-        
+    def forward(self, x, example=None):        
         with nvtx.annotate("find_centers"):
             ct_feat, center_pos_embedding, out_dict_list = self.find_centers(x, example)
             
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_output1.pkl", 'wb') as handle:
-        #     pickle.dump(ct_feat, handle)
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_output2.pkl", 'wb') as handle:
-        #     pickle.dump(center_pos_embedding, handle)
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_output3.pkl", 'wb') as handle:
-        #     pickle.dump(out_dict_list, handle)
-        
         with nvtx.annotate("poolformer_forward"):
             ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
             
             for idx, task in enumerate(self.tasks):
                 out_dict_list[idx]["ct_feat"] = ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
-        
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/poolformer_output.pkl", 'wb') as handle:
-        #     pickle.dump(ct_feat, handle)
         
         return out_dict_list

@@ -326,7 +326,10 @@ class CenterHeadIoU_1d(nn.Module):
             )
         
         to_device = preds_dicts[0]["scores"].device
-        batch, _, H, W = preds_dicts[0]["hm"].size()
+        batch, _ = preds_dicts[0]["scores"].size()
+        H = 360
+        W = 360
+        # batch, _, H, W = preds_dicts[0]["BEV_feat"].size()
         ys, xs = torch.meshgrid([torch.arange(0, H, device=to_device), torch.arange(0, W, device=to_device)])
         ys = ys.view(1, H, W).repeat(batch, 1, 1)
         xs = xs.view(1, H, W).repeat(batch, 1, 1)

@@ -64,6 +64,7 @@ class VoxelNet_dynamic(SingleStageDetector):
             
         x = self.extract_feat(example)
         
+        
         with nvtx.annotate("bbox_head"):
             preds = self.bbox_head(x)
             
