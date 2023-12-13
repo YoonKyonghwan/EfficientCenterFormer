@@ -982,7 +982,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         for i in range(length):
             tensor_list.extend([i] * repeat)
         # Convert the list to a tensor and reshape to a single row
-        row_tensor = torch.tensor(tensor_list, device=to_device)
+        row_tensor = torch.tensor(tensor_list, device=to_device, dtype=torch.float32)
         # Stack the row tensor 'rows' times to create the final tensor
         final_tensor = torch.stack([row_tensor] * rows)
         return final_tensor
