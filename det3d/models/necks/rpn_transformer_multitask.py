@@ -16,6 +16,7 @@ from ..registry import NECKS
 from ..utils import build_norm_layer
 
 import nvtx
+import copy
 
 
 class ChannelAttention(nn.Module):
@@ -800,9 +801,9 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             self.query_embed = nn.Embedding(self.obj_num * len(self.tasks), self._num_filters[-1] * 2)
             nn.init.uniform_(self.query_embed.weight, -1.0, 1.0)
             
-        centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
-        self.cf_engine = load_engine(centerFinder_engine_path)
-        self.cf_context = self.cf_engine.create_execution_context()
+        # centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
+        # self.cf_engine = load_engine(centerFinder_engine_path)
+        # self.cf_context = self.cf_engine.create_execution_context()
 
         logger.info("Finish RPN_transformer_deformable Initialization")
         
@@ -946,11 +947,10 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num * len(self.tasks)))[0]).to(labels)
         order_all = torch.cat(order_list,dim=1)
 
-        ct_feat = (
-            x_up.reshape(batch, -1, H * W)
-            .transpose(2, 1)
-            .contiguous()[self.batch_id, order_all]
-        )  # B, 500, C
+        ct_feat = x_up.reshape(batch, -1, H * W).transpose(2, 1).contiguous()[self.batch_id, order_all] # B, 500, C
+        # reshaped_x_up = x_up.reshape(batch, -1, H * W)
+        # transposed_x_up = reshaped_x_up.transpose(2, 1)
+        # ct_feat = transposed_x_up[self.batch_id, order_all]
         
         y_coor = order_all // W
         x_coor = order_all - y_coor * W
@@ -993,31 +993,33 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         return final_tensor
     
 
-    # def forward(self, x, example=None):        
-    #     with nvtx.annotate("find_centers"):
-    #         ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x, example)
+    def forward(self, x, example=None):        
+        with nvtx.annotate("find_centers"):
+            ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x, example)
             
-    #     with nvtx.annotate("poolformer_forward"):
-    #         ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
+        with nvtx.annotate("poolformer_forward"):
+            ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
             
-    #         out_dict_list = []
-    #         for idx in range(len(self.tasks)):
-    #             out_dict = {}
-    #             out_dict.update(
-    #                 {
-    #                     "scores": out_scores[idx],
-    #                     "labels": out_labels[idx],
-    #                     "order": out_orders[idx],
-    #                     "mask": out_masks[idx],
-    #                     "ct_feat": ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num],
-    #                 }
-    #             )
-    #             out_dict_list.append(out_dict)
+            out_dict_list = []
+            for idx in range(len(self.tasks)):
+                out_dict = {}
+                out_dict.update(
+                    {
+                        "scores": out_scores[idx],
+                        "labels": out_labels[idx],
+                        "order": out_orders[idx],
+                        "mask": out_masks[idx],
+                        "ct_feat": ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num],
+                    }
+                )
+                out_dict_list.append(out_dict)
         
-    #     return out_dict_list
+        return out_dict_list
 
     #forward_trt
-    def forward(self, x, example=None):        
+    @torch.no_grad()
+    def forward_trt(self, x, example=None):        
+        x_copy = copy.deepcopy(x)
         with nvtx.annotate("find_centers"):
             # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x, example)
             ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
@@ -1034,8 +1036,25 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
                 'out_scores': out_scores, 'out_labels': out_labels,
                 'out_orders': out_orders, 'out_masks': out_masks}
             }
+            centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
+            cf_engine = load_engine(centerFinder_engine_path)
+            cf_context = cf_engine.create_execution_context()
+            run_trt_engine(cf_context, cf_engine, IO_tensors)
             
-            run_trt_engine(self.cf_context, self.cf_engine, IO_tensors)
+            # ct_feat2, center_pos_embedding2, out_scores2, out_labels2, out_orders2, out_masks2 = self.find_centers(x_copy)
+            
+            # noError = True
+            # if not torch.allclose(ct_feat, ct_feat2):
+            #     noError = False
+            #     print("ct_feat2")
+            #     print(ct_feat[0][0][:10])
+            #     print(ct_feat2[0][0][:10])
+            # if not torch.allclose(out_scores, out_scores2):
+            #     noError = False
+            #     print("scores")
+            #     print(out_scores[0][0][:10])
+            #     print(out_scores2[0][0][:10])
+            # assert False
             
         with nvtx.annotate("poolformer_forward"):
             ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
