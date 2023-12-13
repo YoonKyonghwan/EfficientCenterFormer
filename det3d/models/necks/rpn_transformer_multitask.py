@@ -893,13 +893,20 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         
     #     return ct_feat, center_pos_embedding, out_dict_list
     
+    
     def find_centers(self, x, example=None):
         x = self.blocks[0](x)
         x_down = self.blocks[1](x)
         x_up = torch.cat([self.blocks[2](x_down), self.up(x)], dim=1)
 
         order_list = []
-        out_dict_list = []
+        num_tasks = len(self.tasks)
+        batch = x.shape[0]
+        to_device = x.device
+        out_scores = torch.zeros((num_tasks, batch, self.obj_num), dtype=torch.float32, device=to_device)
+        out_labels = torch.zeros((num_tasks, batch, self.obj_num), dtype=torch.int64, device=to_device)
+        out_orders = torch.zeros((num_tasks, batch, self.obj_num), dtype=torch.int64, device=to_device)
+        out_masks = torch.zeros((num_tasks, batch, self.obj_num), dtype=torch.bool, device=to_device)
         for idx, task in enumerate(self.tasks):
             # heatmap head
             hm = self.hm_heads[idx](x_up)
@@ -914,58 +921,22 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
 
             scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
 
-            if self.use_gt_training and self.hm_heads[0].training:
-                gt_inds = example["ind"][idx][:, (self.window_size // 2) :: self.window_size]
-                gt_masks = example["mask"][idx][
-                    :, (self.window_size // 2) :: self.window_size
-                ]
-                batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
-                    labels
-                )
-                scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
-                order = scores.sort(1, descending=True)[1]
-                order = order[:, : self.obj_num]
-                scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
-            else:
-                order = scores.sort(1, descending=True)[1]
-                order = order[:, : self.obj_num]
-                # scores = scores.detach().cpu().numpy()
-                # order = np.argsort(-scores, axis=1)[:, : self.obj_num]
-                # order = torch.from_numpy(order).to(labels.device)
-                # scores = torch.from_numpy(scores).to(labels.device)
-                
+            # order = scores.sort(1, descending=True)[1]
+            # order = order[:, : self.obj_num]
+            scores = scores.detach().cpu().numpy()
+            order = np.argsort(-scores, axis=1)[:, : self.obj_num]
+            order = torch.from_numpy(order).to(labels.device)
+            scores = torch.from_numpy(scores).to(labels.device)
 
             scores = torch.gather(scores, 1, order)
             labels = torch.gather(labels, 1, order)
             mask = scores > self.score_threshold
             order_list.append(order)
 
-            out_dict = {}
-            if self.use_gt_training and self.hm_heads[0].training:
-                out_dict.update(
-                    {
-                        "hm": hm,
-                        "scores": scores,
-                        "labels": labels,
-                        "order": order,
-                        "mask": mask,
-                        "BEV_feat": x_up
-                    }
-                )
-            else:
-                out_dict.update(
-                    {
-                        "scores": scores,
-                        "labels": labels,
-                        "order": order,
-                        "mask": mask,
-                    }
-                )
-
-                
-            if self.corner and self.corner_heads[0].training:
-                out_dict.update({"corner_hm": corner_hm})
-            out_dict_list.append(out_dict)
+            out_scores[idx] = scores
+            out_labels[idx] = labels
+            out_orders[idx] = order
+            out_masks[idx] = mask
 
         self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num * len(self.tasks)))[0]).to(labels)
         order_all = torch.cat(order_list,dim=1)
@@ -975,7 +946,6 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             .transpose(2, 1)
             .contiguous()[self.batch_id, order_all]
         )  # B, 500, C
-
         
         y_coor = order_all // W
         x_coor = order_all - y_coor * W
@@ -992,7 +962,8 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         if self.pos_embedding is not None:
             center_pos_embedding = self.pos_embedding(pos_features)
         
-        return ct_feat, center_pos_embedding, out_dict_list
+        return ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks
+        # return ct_feat, center_pos_embedding, out_dict_list
     
 
     def poolformer_forward(self, ct_feat, center_pos):
@@ -1019,12 +990,24 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
 
     def forward(self, x, example=None):        
         with nvtx.annotate("find_centers"):
-            ct_feat, center_pos_embedding, out_dict_list = self.find_centers(x, example)
+            # ct_feat, center_pos_embedding, out_dict_list = self.find_centers(x, example)
+            ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x, example)
             
         with nvtx.annotate("poolformer_forward"):
             ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
             
-            for idx, task in enumerate(self.tasks):
-                out_dict_list[idx]["ct_feat"] = ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
+            out_dict_list = []
+            for idx in range(len(self.tasks)):
+                out_dict = {}
+                out_dict.update(
+                    {
+                        "scores": out_scores[idx],
+                        "labels": out_labels[idx],
+                        "order": out_orders[idx],
+                        "mask": out_masks[idx],
+                        "ct_feat": ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num],
+                    }
+                )
+                out_dict_list.append(out_dict)
         
         return out_dict_list
