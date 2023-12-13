@@ -174,7 +174,7 @@ def main():
 
     print(trt.__version__)
     TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-    centerFinder_engine_path = 'findCenter_folded.trt'
+    centerFinder_engine_path = '/data/centerformer/work_dirs/partition/engine/findCenter.trt'
     cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
     cf_context = cf_engine.create_execution_context()
 
@@ -198,6 +198,7 @@ def main():
             x, _ = model.backbone(voxels, coors, len(example['points']), shape)
             
             # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
+            ct_feat2, center_pos_embedding2, out_scores2, out_labels2, out_orders2, out_masks2 = model.neck.find_centers(x)
             ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
             center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
             out_scores = torch.zeros((6, 1, 500), dtype=torch.float32, device=x.device)
@@ -212,7 +213,11 @@ def main():
                 'out_scores': out_scores, 'out_labels': out_labels,
                 'out_orders': out_orders, 'out_masks': out_masks}
             }
+            run_trt_engine(cf_context, cf_engine, IO_tensors)
             
+            print(ct_feat[0][0][:10])
+            print(ct_feat2[0][0][:10])
+            assert False
             
             ct_feat = model.neck.poolformer_forward(ct_feat, center_pos_embedding)
             
