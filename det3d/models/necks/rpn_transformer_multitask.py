@@ -885,7 +885,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         if len(self.tasks) > 1:
             # print((self.generate_tensor(len(self.tasks), batch, self.obj_num) == torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1)).all())
             # task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
-            task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num).to(pos_features)
+            task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num, pos_features.device)
             pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
 
         if self.pos_embedding is not None:
@@ -913,26 +913,41 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         return ct_feat
     
 
-    def generate_tensor(self, length, rows, repeat):
+    def generate_tensor(self, length, rows, repeat, to_device):
         # Create a tensor of shape (length * repeat,) with repeated values
         tensor_list = []
         for i in range(length):
             tensor_list.extend([i] * repeat)
         # Convert the list to a tensor and reshape to a single row
-        row_tensor = torch.tensor(tensor_list)
+        row_tensor = torch.tensor(tensor_list, device=to_device)
         # Stack the row tensor 'rows' times to create the final tensor
         final_tensor = torch.stack([row_tensor] * rows)
         return final_tensor
     
 
     def forward(self, x, example=None):
+        
+        # import pickle
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_input.pkl", 'wb') as handle:
+        #     pickle.dump(x, handle)
+        
         with nvtx.annotate("find_centers"):
             ct_feat, center_pos_embedding, out_dict_list = self.find_centers(x, example)
+            
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_output1.pkl", 'wb') as handle:
+        #     pickle.dump(ct_feat, handle)
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_output2.pkl", 'wb') as handle:
+        #     pickle.dump(center_pos_embedding, handle)
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/findcenter_output3.pkl", 'wb') as handle:
+        #     pickle.dump(out_dict_list, handle)
         
         with nvtx.annotate("poolformer_forward"):
             ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
             
             for idx, task in enumerate(self.tasks):
                 out_dict_list[idx]["ct_feat"] = ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
+        
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/poolformer_output.pkl", 'wb') as handle:
+        #     pickle.dump(ct_feat, handle)
         
         return out_dict_list

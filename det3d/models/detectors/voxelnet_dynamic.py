@@ -4,6 +4,7 @@ import torch
 from torch.cuda.amp import autocast as autocast
 
 import nvtx
+import pickle
 
 @DETECTORS.register_module
 class VoxelNet_dynamic(SingleStageDetector):
@@ -27,36 +28,55 @@ class VoxelNet_dynamic(SingleStageDetector):
                 output = self.reader(example['points'])    
                 voxels, coors, shape = output 
 
-                data = dict(
-                    features=voxels,
-                    coors=coors,
-                    batch_size=len(example['points']),
-                    input_shape=shape,
-                    voxels=voxels
-                )
+                # data = dict(
+                #     features=voxels,
+                #     coors=coors,
+                #     batch_size=len(example['points']),
+                #     input_shape=shape,
+                #     voxels=voxels
+                # )
+                
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/reader_output.pkl", 'wb') as handle:
+        #     pickle.dump(output, handle)
         
         with nvtx.annotate("3D_backbone"):
-            x, voxel_feature = self.backbone(
-                    data['voxels'], data["coors"], data["batch_size"], data["input_shape"]
-                )
+            # x, voxel_feature = self.backbone(
+            #         data['voxels'], data["coors"], data["batch_size"], data["input_shape"]
+            #     )
+            x, _ = self.backbone(voxels,coors, len(example['points']), shape)
+            
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/backbone_output.pkl", 'wb') as handle:
+        #     pickle.dump(x, handle)
 
         if self.with_neck:
             x = self.neck(x, example)
         
-        return x, voxel_feature
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/neck_output.pkl", 'wb') as handle:
+        #     pickle.dump(x, handle)
+        
+        return x
 
     # def forward(self, example, return_loss=True, **kwargs):
     def forward(self, example, return_loss=True):
+        
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/example.pkl", 'wb') as handle:
+        #     pickle.dump(example, handle)
             
-        x, _ = self.extract_feat(example)
+        x = self.extract_feat(example)
         
         with nvtx.annotate("bbox_head"):
             preds = self.bbox_head(x)
+            
+        # with open("/workspace/centerformer/work_dirs/partition/sample_data/bbox_head_output.pkl", 'wb') as handle:
+        #     pickle.dump(preds, handle)
                 
         with nvtx.annotate("post_processing"):
             if return_loss:
                 return self.bbox_head.loss(example, preds, self.test_cfg)
             else:
+                # temp = self.bbox_head.predict(example, preds, self.test_cfg)
+                # with open("/workspace/centerformer/work_dirs/partition/sample_data/predict_output.pkl", 'wb') as handle:
+                #     pickle.dump(temp, handle)
                 return self.bbox_head.predict(example, preds, self.test_cfg)
 
 
@@ -76,7 +96,7 @@ class VoxelNet_dynamic(SingleStageDetector):
             input_shape=example["shape"][0],
         )
 
-        x, _ = self.extract_feat(example, data)
+        x = self.extract_feat(example, data)
         bev_feature = x['BEV_feat']
         preds = self.bbox_head(x)
 

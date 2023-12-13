@@ -13,10 +13,12 @@ venv/
 *.zip
 *.bin
 .vscode/
-work_dirs/
 demo/
 *.log
 *.json
 core.*
+
+*.onnx
+*.trt
 
 centerformer_back
