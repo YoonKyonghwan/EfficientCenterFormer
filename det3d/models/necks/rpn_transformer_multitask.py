@@ -9,6 +9,7 @@ from torch.nn import functional as F
 from det3d.torchie.cnn import xavier_init
 from det3d.models.utils import Sequential
 from det3d.models.utils import Transformer, Deform_Transformer, Poolformer
+from det3d.models.utils.tensorRTHelper import run_trt_engine, load_engine
 
 from .. import builder
 from ..registry import NECKS
@@ -798,6 +799,10 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         if self.parametric_embedding:
             self.query_embed = nn.Embedding(self.obj_num * len(self.tasks), self._num_filters[-1] * 2)
             nn.init.uniform_(self.query_embed.weight, -1.0, 1.0)
+            
+        centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
+        self.cf_engine = load_engine(centerFinder_engine_path)
+        self.cf_context = self.cf_engine.create_execution_context()
 
         logger.info("Finish RPN_transformer_deformable Initialization")
         
@@ -988,15 +993,56 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         return final_tensor
     
 
+    # def forward(self, x, example=None):        
+    #     with nvtx.annotate("find_centers"):
+    #         ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x, example)
+            
+    #     with nvtx.annotate("poolformer_forward"):
+    #         ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
+            
+    #         out_dict_list = []
+    #         for idx in range(len(self.tasks)):
+    #             out_dict = {}
+    #             out_dict.update(
+    #                 {
+    #                     "scores": out_scores[idx],
+    #                     "labels": out_labels[idx],
+    #                     "order": out_orders[idx],
+    #                     "mask": out_masks[idx],
+    #                     "ct_feat": ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num],
+    #                 }
+    #             )
+    #             out_dict_list.append(out_dict)
+        
+    #     return out_dict_list
+
+    #forward_trt
     def forward(self, x, example=None):        
         with nvtx.annotate("find_centers"):
-            # ct_feat, center_pos_embedding, out_dict_list = self.find_centers(x, example)
-            ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x, example)
+            # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x, example)
+            ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
+            center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
+            out_scores = torch.zeros((6, 1, 500), dtype=torch.float32, device=x.device)
+            out_labels = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
+            out_orders = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
+            out_masks = torch.zeros((6, 1, 500), dtype=torch.bool, device=x.device)
+            IO_tensors = {
+                "inputs" :
+                {'input_tensor': x},
+                "outputs" :
+                {'ct_feat': ct_feat, 'center_pos_embedding': center_pos_embedding,
+                'out_scores': out_scores, 'out_labels': out_labels,
+                'out_orders': out_orders, 'out_masks': out_masks}
+            }
+            
+            run_trt_engine(self.cf_context, self.cf_engine, IO_tensors)
             
         with nvtx.annotate("poolformer_forward"):
             ct_feat = self.poolformer_forward(ct_feat, center_pos_embedding)
             
             out_dict_list = []
+            out_labels = out_labels.to(dtype=torch.int64, device=out_labels.device)
+            out_orders = out_orders.to(dtype=torch.int64, device=out_orders.device)
             for idx in range(len(self.tasks)):
                 out_dict = {}
                 out_dict.update(
