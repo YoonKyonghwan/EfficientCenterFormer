@@ -801,16 +801,16 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             self.query_embed = nn.Embedding(self.obj_num * len(self.tasks), self._num_filters[-1] * 2)
             nn.init.uniform_(self.query_embed.weight, -1.0, 1.0)
             
-        centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded_op17_v1.trt'
-        self.cf_engine = load_engine(centerFinder_engine_path)
-        self.cf_context = self.cf_engine.create_execution_context()
+        # centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
+        # self.cf_engine = load_engine(centerFinder_engine_path)
+        # self.cf_context = self.cf_engine.create_execution_context()
         
-        self.ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device="cuda")
-        self.center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32, device="cuda")
-        self.out_scores = torch.zeros((6, 1, 500), dtype=torch.float32, device="cuda")
-        self.out_labels = torch.zeros((6, 1, 500), dtype=torch.int32, device="cuda")
-        self.out_orders = torch.zeros((6, 1, 500), dtype=torch.int32, device="cuda")
-        self.out_masks = torch.zeros((6, 1, 500), dtype=torch.bool, device="cuda")
+        # self.ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device="cuda")
+        # self.center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32, device="cuda")
+        # self.out_scores = torch.zeros((6, 1, 500), dtype=torch.float32, device="cuda")
+        # self.out_labels = torch.zeros((6, 1, 500), dtype=torch.int32, device="cuda")
+        # self.out_orders = torch.zeros((6, 1, 500), dtype=torch.int32, device="cuda")
+        # self.out_masks = torch.zeros((6, 1, 500), dtype=torch.bool, device="cuda")
         
 
         logger.info("Finish RPN_transformer_deformable Initialization")
@@ -845,10 +845,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
 
             # order = scores.sort(1, descending=True)[1]
             # order = order[:, : self.obj_num]
-            scores = scores.detach().cpu().numpy()
-            order = np.argsort(-scores, axis=1)[:, : self.obj_num]
-            order = torch.from_numpy(order).to(labels.device)
-            scores = torch.from_numpy(scores).to(labels.device)
+            order = torch.topk(scores, self.obj_num, dim=1, largest=True, sorted=True)[1]
 
             scores = torch.gather(scores, 1, order)
             labels = torch.gather(labels, 1, order)
@@ -872,6 +869,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         pos_features = torch.stack([x_coor, y_coor], dim=2)
         
         if len(self.tasks) > 1:
+            # task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
             task_ids = self.generate_tensor(len(self.tasks), batch, self.obj_num, pos_features.device)
             pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
 

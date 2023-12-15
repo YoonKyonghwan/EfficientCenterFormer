@@ -23,9 +23,8 @@ from det3d.torchie.apis.train import example_to_device
 from det3d.torchie.trainer import load_checkpoint
 from det3d.torchie.trainer.utils import all_gather, synchronize
 from torch.nn.parallel import DistributedDataParallel
-import pickle 
-import time 
 import tensorrt as trt
+import nvtx
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a detector")
@@ -162,65 +161,70 @@ def main():
 
     detections = {}
 
-    # print(trt.__version__)
-    # TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-    # centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded_op17_v1.trt'
-    # cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
-    # cf_context = cf_engine.create_execution_context()
+    print(trt.__version__)
+    TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+    centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
+    cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
+    cf_context = cf_engine.create_execution_context()
+    ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32).cuda(cfg.local_rank)
+    center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32).cuda(cfg.local_rank)
+    out_scores = torch.zeros((6, 1, 500), dtype=torch.float32).cuda(cfg.local_rank)
+    out_labels = torch.zeros((6, 1, 500), dtype=torch.int32).cuda(cfg.local_rank)
+    out_orders = torch.zeros((6, 1, 500), dtype=torch.int32).cuda(cfg.local_rank)
+    out_masks = torch.zeros((6, 1, 500), dtype=torch.bool).cuda(cfg.local_rank)
 
     for i, data_batch in enumerate(data_loader):
 
         device = torch.device(args.local_rank)
 
         example = example_to_device(data_batch, device, non_blocking=False)
+        example_points = example['points']
+        example_metadata = example['metadata']
         del data_batch
         with torch.no_grad():
             # outputs = model(example, return_loss=False)
-            reader_output = model.reader(example['points'])    
-            voxels, coors, shape = reader_output
-            x, _ = model.backbone(voxels, coors, len(example['points']), shape)
-            
-            ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
-            # ct_feat2, center_pos_embedding2, out_scores2, out_labels2, out_orders2, out_masks2 = model.neck.find_centers(x)
-            # ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
-            # center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
-            # out_scores = torch.zeros((6, 1, 500), dtype=torch.float32, device=x.device)
-            # out_labels = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
-            # out_orders = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
-            # out_masks = torch.zeros((6, 1, 500), dtype=torch.bool, device=x.device)
-            # IO_tensors = {
-            #     "inputs" :
-            #     {'input_tensor': x},
-            #     "outputs" :
-            #     {'ct_feat': ct_feat, 'center_pos_embedding': center_pos_embedding,
-            #     'out_scores': out_scores, 'out_labels': out_labels,
-            #     'out_orders': out_orders, 'out_masks': out_masks}
-            # }
-            # run_trt_engine(cf_context, cf_engine, IO_tensors)
-            
-            # print(ct_feat[0][0][:10])
-            # print(ct_feat2[0][0][:10])
-            # assert False
-            
-            ct_feat = model.neck.poolformer_forward(ct_feat, center_pos_embedding)
-            
-            out_dict_list = []
-            
-            for idx in range(len(cfg.tasks)):
-                out_dict = {}
-                out_dict.update(
-                    {
-                        "scores": out_scores[idx],
-                        "labels": out_labels[idx],
-                        "order": out_orders[idx],
-                        "mask": out_masks[idx],
-                        "ct_feat": ct_feat[:, :, idx * cfg.test_cfg['obj_num'] : (idx+1) * cfg.test_cfg['obj_num']],
-                    }
-                )
-                out_dict_list.append(out_dict)
+            with nvtx.annotate("reader"):
+                reader_output = model.reader(example_points)    
                 
-            preds = model.bbox_head(out_dict_list)
-            outputs = model.bbox_head.predict(example, preds, model.test_cfg)
+            with nvtx.annotate("3D_backbone"):
+                voxels, coors, shape = reader_output
+                x, _ = model.backbone(voxels, coors, len(example_points), shape)
+            
+            with nvtx.annotate("find_centers"):
+                # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
+                IO_tensors = {
+                    "inputs" :
+                    {'input_tensor': x},
+                    "outputs" :
+                    {'ct_feat': ct_feat, 'center_pos_embedding': center_pos_embedding,
+                    'out_scores': out_scores, 'out_labels': out_labels,
+                    'out_orders': out_orders, 'out_masks': out_masks}
+                }
+                run_trt_engine(cf_context, cf_engine, IO_tensors)
+            
+            with nvtx.annotate("poolformer_forward"):
+                poolformer_output = model.neck.poolformer_forward(ct_feat, center_pos_embedding)
+            
+                out_dict_list = []
+                
+                for idx in range(len(cfg.tasks)):
+                    out_dict = {}
+                    out_dict.update(
+                        {
+                            "scores": out_scores[idx],
+                            "labels": out_labels[idx],
+                            "order": out_orders[idx],
+                            "mask": out_masks[idx],
+                            "ct_feat": poolformer_output[:, :, idx * cfg.test_cfg['obj_num'] : (idx+1) * cfg.test_cfg['obj_num']],
+                        }
+                    )
+                    out_dict_list.append(out_dict)
+            
+            with nvtx.annotate("bbox_head"):
+                preds = model.bbox_head(out_dict_list)
+                
+            with nvtx.annotate("post_processing"):
+                outputs = model.bbox_head.predict(example_metadata, preds, model.test_cfg)
             
         for output in outputs:
             token = output["metadata"]["token"]
