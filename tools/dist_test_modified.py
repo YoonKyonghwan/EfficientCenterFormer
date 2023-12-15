@@ -161,31 +161,14 @@ def main():
         prog_bar = torchie.ProgressBar(len(data_loader.dataset) // cfg.gpus)
 
     detections = {}
-    cpu_device = torch.device("cpu")
 
-    start = time.time()
-
-    start = 100
-    end = 100+int(len(dataset) * 1 /50)
-
-    time_start = 0 
-    time_end = 0 
-    
-
-    print(trt.__version__)
-    TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-    centerFinder_engine_path = '/data/centerformer/work_dirs/partition/engine/findCenter.trt'
-    cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
-    cf_context = cf_engine.create_execution_context()
+    # print(trt.__version__)
+    # TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+    # centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded_op17_v1.trt'
+    # cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
+    # cf_context = cf_engine.create_execution_context()
 
     for i, data_batch in enumerate(data_loader):
-        if i == start:
-            torch.cuda.synchronize()
-            time_start = time.time()
-
-        if i == end:
-            torch.cuda.synchronize()
-            time_end = time.time()
 
         device = torch.device(args.local_rank)
 
@@ -197,27 +180,27 @@ def main():
             voxels, coors, shape = reader_output
             x, _ = model.backbone(voxels, coors, len(example['points']), shape)
             
-            # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
-            ct_feat2, center_pos_embedding2, out_scores2, out_labels2, out_orders2, out_masks2 = model.neck.find_centers(x)
-            ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
-            center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
-            out_scores = torch.zeros((6, 1, 500), dtype=torch.float32, device=x.device)
-            out_labels = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
-            out_orders = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
-            out_masks = torch.zeros((6, 1, 500), dtype=torch.bool, device=x.device)
-            IO_tensors = {
-                "inputs" :
-                {'input_tensor': x},
-                "outputs" :
-                {'ct_feat': ct_feat, 'center_pos_embedding': center_pos_embedding,
-                'out_scores': out_scores, 'out_labels': out_labels,
-                'out_orders': out_orders, 'out_masks': out_masks}
-            }
-            run_trt_engine(cf_context, cf_engine, IO_tensors)
+            ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
+            # ct_feat2, center_pos_embedding2, out_scores2, out_labels2, out_orders2, out_masks2 = model.neck.find_centers(x)
+            # ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
+            # center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32, device=x.device)
+            # out_scores = torch.zeros((6, 1, 500), dtype=torch.float32, device=x.device)
+            # out_labels = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
+            # out_orders = torch.zeros((6, 1, 500), dtype=torch.int32, device=x.device)
+            # out_masks = torch.zeros((6, 1, 500), dtype=torch.bool, device=x.device)
+            # IO_tensors = {
+            #     "inputs" :
+            #     {'input_tensor': x},
+            #     "outputs" :
+            #     {'ct_feat': ct_feat, 'center_pos_embedding': center_pos_embedding,
+            #     'out_scores': out_scores, 'out_labels': out_labels,
+            #     'out_orders': out_orders, 'out_masks': out_masks}
+            # }
+            # run_trt_engine(cf_context, cf_engine, IO_tensors)
             
-            print(ct_feat[0][0][:10])
-            print(ct_feat2[0][0][:10])
-            assert False
+            # print(ct_feat[0][0][:10])
+            # print(ct_feat2[0][0][:10])
+            # assert False
             
             ct_feat = model.neck.poolformer_forward(ct_feat, center_pos_embedding)
             
@@ -245,7 +228,7 @@ def main():
                 if k not in [
                     "metadata",
                 ]:
-                    output[k] = v.to(cpu_device)
+                    output[k] = v.cpu()
             detections.update(
                 {token: output,}
             )
@@ -256,9 +239,6 @@ def main():
 
     # torch.cuda.empty_cache()
     all_predictions = all_gather(detections)
-
-    print("\n Total time per frame: ", (time_end -  time_start) / (end - start))
-    # print("\n Total time per frame: ", (time_end -  time_start) / (i+1))
 
     if args.local_rank != 0:
         return
