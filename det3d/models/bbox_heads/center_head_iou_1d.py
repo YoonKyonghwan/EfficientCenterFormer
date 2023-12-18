@@ -311,7 +311,7 @@ class CenterHeadIoU_1d(nn.Module):
         return rets_merged
 
     @torch.no_grad()
-    def predict(self, example, preds_dicts, test_cfg, **kwargs):
+    def predict(self, example_metadata, preds_dicts, test_cfg, **kwargs):
         """decode, nms, then return the detection result. Additionaly support double flip testing"""
         # get loss info
         rets = []
@@ -343,12 +343,12 @@ class CenterHeadIoU_1d(nn.Module):
 
             # batch_size = preds_dict["scores"].shape[0]
 
-            if "metadata" not in example or len(example["metadata"]) == 0:
+            if len(example_metadata) == 0:
                 # meta_list = [None] * batch_size
                 meta_list = [None] * batch
                 
             else:
-                meta_list = example["metadata"]
+                meta_list = example_metadata
 
             batch_score = preds_dict["scores"]
             batch_label = preds_dict["labels"]
@@ -414,7 +414,6 @@ class CenterHeadIoU_1d(nn.Module):
             else:
                 rets.append(
                     self.post_processing(
-                        example,
                         batch_box_preds,
                         batch_score,
                         batch_label,
@@ -458,7 +457,6 @@ class CenterHeadIoU_1d(nn.Module):
     @torch.no_grad()
     def post_processing(
         self,
-        example,
         batch_box_preds,
         batch_score,
         batch_label,

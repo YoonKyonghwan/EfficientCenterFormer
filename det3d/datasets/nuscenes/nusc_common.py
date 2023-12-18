@@ -518,4 +518,4 @@ def eval_main(nusc, eval_version, res_path, eval_set, output_dir):
         output_dir=output_dir,
         verbose=False,
     )
-    metrics_summary = nusc_eval.main(plot_examples=3, render_curves=False)
+    metrics_summary = nusc_eval.main(plot_examples=2, render_curves=False)

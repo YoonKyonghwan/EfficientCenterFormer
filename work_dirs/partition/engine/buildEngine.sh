@@ -4,6 +4,7 @@ trtexec --onnx=../onnx/$name.onnx \
         --saveEngine=$name.trt \
         --memPoolSize=workspace:4096 \
         --fp16 \
+        --explicitBatch \
         --verbose \
         --dumpLayerInfo \
         --dumpProfile \

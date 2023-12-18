@@ -57,7 +57,7 @@ class VoxelNet_dynamic(SingleStageDetector):
         return x
 
     # def forward(self, example, return_loss=True, **kwargs):
-    def forward(self, example, return_loss=True):
+    def forward(self, example, return_loss=False):
         
         # with open("/workspace/centerformer/work_dirs/partition/sample_data/example.pkl", 'wb') as handle:
         #     pickle.dump(example, handle)
@@ -78,7 +78,7 @@ class VoxelNet_dynamic(SingleStageDetector):
                 # temp = self.bbox_head.predict(example, preds, self.test_cfg)
                 # with open("/workspace/centerformer/work_dirs/partition/sample_data/predict_output.pkl", 'wb') as handle:
                 #     pickle.dump(temp, handle)
-                return self.bbox_head.predict(example, preds, self.test_cfg)
+                return self.bbox_head.predict(example['metadata'], preds, self.test_cfg)
 
 
     def forward_two_stage(self, example, return_loss=True, **kwargs):
