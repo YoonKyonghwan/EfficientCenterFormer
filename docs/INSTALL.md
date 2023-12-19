@@ -1,27 +1,23 @@
 ## Installation
-Modified from [CenterPoint](https://github.com/tianweiy/CenterPoint)
+Modified from [CenterFormer](https://github.com/TuSimple/centerformer)
 
 Our experiments are tested on the following environments:
+- Python: 3.9.18
+- PyTorch: 2.0.1+cu118
+- CUDA: 11.8
+- tensorRT: 8.5
 
-- Python: 3.9.12
-- PyTorch: 1.9.1
-- CUDA: 11.1
-- We use spconv 1.2.1 in our experiment.
-
-### Installation 
-
+### Installation & Setup
 ```bash
 # basic python libraries
-conda create --name centerformer python=3.9
-conda activate centerformer
-pip install torch==1.9.1+cu111 torchvision==0.10.1+cu111 torchaudio==0.9.1 -f https://download.pytorch.org/whl/torch_stable.html
-git clone [this repo]
-cd centerformer
-pip install -r requirements.txt
+conda create --name effientCF python=3.9
+conda activate effientCF
 sh setup.sh
+```
 
+```bash
 # add CenterFormer to PYTHONPATH by adding the following line to ~/.bashrc (change the path accordingly)
 export PYTHONPATH="${PYTHONPATH}:PATH_TO_CENTERFORMER"
 ```
 
-Most of the libaraies are the same as [CenterPoint](https://github.com/tianweiy/CenterPoint) except for the transformer part. If you run into any issues, you can also refer to their detailed instructions and search from the issues in their repo.
+Most of the libaraies are the same as [CenterFormer](https://github.com/TuSimple/centerformer) except for the transformer part. If you run into any issues, you can also refer to their detailed instructions and search from the issues in their repo.

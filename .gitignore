@@ -20,5 +20,8 @@ core.*
 
 *.onnx
 *.trt
+*.png
+*.nsys-rep
+*.sqlite
 
 centerformer_back

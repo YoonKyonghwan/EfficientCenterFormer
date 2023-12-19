@@ -3,22 +3,12 @@
 ## Highlights
 - **ToDO** need to describe the optimization technique that we use
 
-## Experiment
-Modified from [CenterFormer](https://github.com/TuSimple/centerformer)
 
-Our experiments are tested on the following environments:
-- Python: 3.9.18
-- PyTorch: 2.0.1+cu118
-- CUDA: 11.8
-- tensorRT: 8.5
+## Installation
+Please refer to [INSTALL](docs/INSTALL.md) to set up libraries needed for distributed training and sparse convolution.
 
-### Installation & Setup
-```bash
-# basic python libraries
-conda create --name effientCF python=3.9
-conda activate effientCF
-sh setup.sh
-```
+## Training and Evaluation
+Please refer to [WAYMO](docs/WAYMO.md) and [nuScenes](docs/NUSC.md) to prepare the data, training and evaluation.
 
 ## Result
 
@@ -48,12 +38,6 @@ sh setup.sh
 | [CenterFormer deformable](configs/nusc/nuscenes_centerformer_deformable_separate_detection_head.py)| 68.4     |  63.0      |
 
 The training and evaluation configs of the above models are provided in [Configs](configs/waymo/README.md).
-
-## Installation
-Please refer to [INSTALL](docs/INSTALL.md) to set up libraries needed for distributed training and sparse convolution.
-
-## Training and Evaluation
-Please refer to [WAYMO](docs/WAYMO.md) and [nuScenes](docs/NUSC.md) to prepare the data, training and evaluation.
 
 
 ## Acknowlegement
