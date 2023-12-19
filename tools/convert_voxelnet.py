@@ -10,7 +10,8 @@ from collections import OrderedDict
 try:
     import apex
 except:
-    print("No APEX!")
+    # print("No APEX!")
+    pass
 import numpy as np
 import torch
 import yaml

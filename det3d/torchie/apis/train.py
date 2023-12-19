@@ -28,7 +28,8 @@ from functools import partial
 try:
     import apex
 except:
-    print("No APEX!")
+    # print("No APEX!")
+    pass
 
 import numpy as np
 import torch

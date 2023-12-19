@@ -25,7 +25,8 @@ import os
 try:
     import apex
 except:
-    print("No APEX!")
+    # print("No APEX!")
+    pass
 
 from det3d import torchie
 from det3d.datasets import build_dataloader, build_dataset

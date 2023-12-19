@@ -16,7 +16,8 @@ try:
     import tensorflow as tf
     tf.enable_eager_execution()
 except:
-    print("No Tensorflow")
+    # print("No Tensorflow")
+    pass
 
 from nuscenes.utils.geometry_utils import transform_matrix
 from pyquaternion import Quaternion

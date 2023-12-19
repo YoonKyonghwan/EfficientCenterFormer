@@ -1,83 +1,36 @@
 import argparse
 import copy
 import os
-
 import numpy as np
 import torch
-import yaml
+import tensorrt as trt
+import nvtx
+
 from det3d import torchie
 from det3d.datasets import build_dataloader, build_dataset
 from det3d.models import build_detector
 from det3d.torchie import Config
-from det3d.torchie.apis import (
-    batch_processor,
-    build_optimizer,
-    get_root_logger,
-    init_dist,
-    set_random_seed,
-    train_detector,
-)
-
+from det3d.torchie.apis import get_root_logger
 from det3d.torchie.apis.train import example_to_device
-
 from det3d.torchie.trainer import load_checkpoint
 from det3d.torchie.trainer.utils import all_gather, synchronize
 from torch.nn.parallel import DistributedDataParallel
-import tensorrt as trt
-import nvtx
+from trt_utils import load_engine, run_trt_engine
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a detector")
-    parser.add_argument("config", help="train config file path")
+    parser.add_argument("--config", help="train config file path")
     parser.add_argument("--work_dir", required=True, help="the dir to save logs and models")
-    parser.add_argument(
-        "--checkpoint", help="the dir to checkpoint which the model read from"
-    )
-    parser.add_argument(
-        "--txt_result",
-        type=bool,
-        default=False,
-        help="whether to save results to standard KITTI format of txt type",
-    )
-    parser.add_argument(
-        "--gpus",
-        type=int,
-        default=1,
-        help="number of gpus to use " "(only applicable to non-distributed training)",
-    )
-    parser.add_argument(
-        "--launcher",
-        choices=["none", "pytorch", "slurm", "mpi"],
-        default="none",
-        help="job launcher",
-    )
-    parser.add_argument("--speed_test", action="store_true")
+    parser.add_argument("--checkpoint", help="the dir to checkpoint which the model read from")
+    parser.add_argument("--centerfinder_trt", help="the path of centerfinder trt engine")
+    parser.add_argument("--gpus", type=int, default=1, help="number of gpus to use " "(only applicable to non-distributed training)")
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--testset", action="store_true")
 
     args = parser.parse_args()
     if "LOCAL_RANK" not in os.environ:
         os.environ["LOCAL_RANK"] = str(args.local_rank)
-
     return args
-
-def run_trt_engine(context, engine, tensors):
-    bindings = [None]*engine.num_bindings
-    for idx, binding in enumerate(engine):
-        tensor_name = engine.get_tensor_name(idx)
-        if engine.get_tensor_mode(binding)==trt.TensorIOMode.INPUT:
-            bindings[idx] = tensors['inputs'][tensor_name].data_ptr()
-            if context.get_tensor_shape(tensor_name):
-                context.set_input_shape(tensor_name, tensors['inputs'][tensor_name].shape)
-        else:
-            bindings[idx] = tensors['outputs'][tensor_name].data_ptr()
-    context.execute_v2(bindings=bindings)
-
-
-def load_engine(engine_filepath, trt_logger):
-    with open(engine_filepath, "rb") as f, trt.Runtime(trt_logger) as runtime:
-        engine = runtime.deserialize_cuda_engine(f.read())
-    return engine
 
 def main():
     args = parse_args()
@@ -114,10 +67,11 @@ def main():
         cfg.model['neck']['score_threshold'] = cfg.test_cfg['score_threshold']
         print('Use heatmap score threshold {} in inference'.format(cfg.model['neck']['score_threshold']))
 
+    # set model
     model = build_detector(cfg.model, train_cfg=None, test_cfg=cfg.test_cfg)
-    
-    # print(model)
+    load_checkpoint(model, args.checkpoint, map_location="cpu")
 
+    # build dataset
     if args.testset:
         print("Use Test Set")
         dataset = build_dataset(cfg.data.test)
@@ -127,13 +81,11 @@ def main():
 
     data_loader = build_dataloader(
         dataset,
-        batch_size=cfg.data.samples_per_gpu if not args.speed_test else 1,
+        batch_size=cfg.data.samples_per_gpu,
         workers_per_gpu=cfg.data.workers_per_gpu,
         dist=distributed,
         shuffle=False,
     )
-
-    checkpoint = load_checkpoint(model, args.checkpoint, map_location="cpu")
 
     # put model on gpus
     if distributed:
@@ -142,28 +94,24 @@ def main():
             model.cuda(cfg.local_rank),
             device_ids=[cfg.local_rank],
             output_device=cfg.local_rank,
-            # broadcast_buffers=False,
             find_unused_parameters=True,
         )
     else:
-        # model = fuse_bn_recursively(model)
         model = model.cuda()
 
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('parameter size:', pytorch_total_params)
 
     model.eval()
-    mode = "val"
 
-    logger.info(f"work dir: {args.work_dir}")
     if cfg.local_rank == 0:
         prog_bar = torchie.ProgressBar(len(data_loader.dataset) // cfg.gpus)
 
     detections = {}
 
-    print(trt.__version__)
+    # load centerfinder trt engine and allocate buffers
     TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-    centerFinder_engine_path = '/workspace/centerformer/work_dirs/partition/engine/findCenter_folded.trt'
+    centerFinder_engine_path = args.centerfinder_trt
     cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
     cf_context = cf_engine.create_execution_context()
     ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32).cuda(cfg.local_rank)
@@ -174,15 +122,15 @@ def main():
     out_masks = torch.zeros((6, 1, 500), dtype=torch.bool).cuda(cfg.local_rank)
 
     for i, data_batch in enumerate(data_loader):
-
         device = torch.device(args.local_rank)
 
         example = example_to_device(data_batch, device, non_blocking=False)
         example_points = example['points']
         example_metadata = example['metadata']
         del data_batch
+        del example
+        
         with torch.no_grad():
-            # outputs = model(example, return_loss=False)
             with nvtx.annotate("reader"):
                 reader_output = model.reader(example_points)    
                 
@@ -256,12 +204,9 @@ def main():
 
     result_dict, _ = dataset.evaluation(copy.deepcopy(predictions), output_dir=args.work_dir, testset=args.testset)
 
-    if result_dict is not None:
-        for k, v in result_dict["results"].items():
-            print(f"Evaluation {k}: {v}")
-
-    if args.txt_result:
-        assert False, "No longer support kitti"
+    # if result_dict is not None:
+    #     for k, v in result_dict["results"].items():
+    #         print(f"Evaluation {k}: {v}")
 
 if __name__ == "__main__":
     main()

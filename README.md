@@ -1,30 +1,24 @@
-# CenterFormer
-Official implementation for [**CenterFormer: Center-based Transformer for 3D Object Detection**](https://arxiv.org/abs/2209.05588) (ECCV 2022 Oral)
-```
-@InProceedings{Zhou_centerformer,
-title = {CenterFormer: Center-based Transformer for 3D Object Detection},
-author = {Zhou, Zixiang and Zhao, Xiangchen and Wang, Yu and Wang, Panqu and Foroosh, Hassan},
-booktitle = {ECCV},
-year = {2022}
-}
-```
+# Optimization of Inference with CenterFormer
 
 ## Highlights
-- **Center Transformer** We introduce a center-based transformer network for 3D object detection. 
+- **ToDO** need to describe the optimization technique that we use
 
-- **Fast and Easy to Train** We use the center feature as the initial query embedding to facilitate learning of the transformer. We propose a multi-scale cross-attention layer to efficiently aggregate neighboring features without significantly increasing the computational complexity.
+## Experiment
+Modified from [CenterFormer](https://github.com/TuSimple/centerformer)
 
-- **Temporal information**: We propose using the cross-attention transformer to fuse object features from past frames.
+Our experiments are tested on the following environments:
+- Python: 3.9.18
+- PyTorch: 2.0.1+cu118
+- CUDA: 11.8
+- tensorRT: 8.5
 
-<p align="center"> <img src='docs/mtf_architecture_eccv.png' align="center" height="500px"> </p>
-
-## NEWS
-[2022-12-09] Add support for multi-task head and nuScenes training configs. 
-
-[2022-09-30] CenterFormer source code is released. 
-
-## Abstract
-Query-based transformer has shown great potential in constructing long-range attention in many image-domain tasks, but has rarely been considered in LiDAR-based 3D object detection due to the overwhelming size of the point cloud data. In this paper, we propose **CenterFormer**, a center-based transformer network for 3D object detection. CenterFormer first uses a center heatmap to select center candidates on top of a standard voxel-based point cloud encoder. It then uses the feature of the center candidate as the query embedding in the transformer. To further aggregate features from multiple frames, we design an approach to fuse features through cross-attention. Lastly, regression heads are added to predict the bounding box on the output center feature representation. Our design reduces the convergence difficulty and computational complexity of the transformer structure. The results show significant improvements over the strong baseline of anchor-free object detection networks. CenterFormer achieves state-of-the-art performance for a single model on the Waymo Open Dataset, with 73.7% mAPH on the validation set and 75.6% mAPH on the test set, significantly outperforming all previously published CNN and transformer-based methods.
+### Installation & Setup
+```bash
+# basic python libraries
+conda create --name effientCF python=3.9
+conda activate effientCF
+sh setup.sh
+```
 
 ## Result
 

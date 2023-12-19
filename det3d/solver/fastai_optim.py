@@ -11,7 +11,7 @@ try:
     from apex.parallel.optimized_sync_batchnorm import SyncBatchNorm
     bn_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.modules.batchnorm._BatchNorm, SyncBatchNorm)
 except:
-    print('no apex')
+    # print('no apex')
     bn_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d,nn.modules.batchnorm._BatchNorm)
 
 def split_bn_bias(layer_groups):

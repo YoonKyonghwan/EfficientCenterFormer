@@ -4,10 +4,6 @@ import json
 import os
 import sys
 
-# try:
-#     import apex
-# except:
-#     print("No APEX!")
 import numpy as np
 import torch
 import yaml

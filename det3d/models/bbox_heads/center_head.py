@@ -19,7 +19,8 @@ import copy
 try:
     from det3d.ops.dcn import DeformConv
 except:
-    print("Deformable Convolution not built!")
+    # print("Deformable Convolution not built!")
+    pass
 
 from det3d.core.utils.circle_nms_jit import circle_nms
 
