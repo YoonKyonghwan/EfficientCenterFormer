@@ -1,4 +1,16 @@
 # install dependencies
+cuda_version=$1
+case $cuda_version in
+    "11.8")
+        conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+        pip install spconv-cu118;;
+    "12.0"|"12.1"|"12.2")
+        conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+        pip install spconv-cu120;;
+    *)
+        echo "Unsupported CUDA version: $cuda_version";;
+esac
+
 pip install -r requirements.txt
 
 cd det3d/ops/iou3d_nms
@@ -8,15 +20,6 @@ cd ../.. && cd models/ops/
 python setup.py build install
 python test.py
 
-cuda_version=$1
-case $cuda_version in
-    "11.8")
-        pip install spconv-cu118;;
-    "12.0"|"12.1"|"12.2")
-        pip install spconv-cu120;;
-    *)
-        echo "Unsupported CUDA version: $cuda_version";;
-esac
 
 tensorRT_version=$2
 case $tensorRT_version in
