@@ -79,9 +79,10 @@ def main():
         print("Use Val Set")
         dataset = build_dataset(cfg.data.val)
 
+    batch_size = cfg.data.samples_per_gpu
     data_loader = build_dataloader(
         dataset,
-        batch_size=cfg.data.samples_per_gpu,
+        batch_size=batch_size,
         workers_per_gpu=cfg.data.workers_per_gpu,
         dist=distributed,
         shuffle=False,
@@ -114,14 +115,17 @@ def main():
     centerFinder_engine_path = args.centerfinder_trt
     cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
     cf_context = cf_engine.create_execution_context()
-    ct_feat = torch.zeros((1, 3000, 256), dtype=torch.float32).cuda(cfg.local_rank)
-    center_pos_embedding = torch.zeros((1, 3000, 256), dtype=torch.float32).cuda(cfg.local_rank)
-    out_scores = torch.zeros((6, 1, 500), dtype=torch.float32).cuda(cfg.local_rank)
-    out_labels = torch.zeros((6, 1, 500), dtype=torch.int32).cuda(cfg.local_rank)
-    out_orders = torch.zeros((6, 1, 500), dtype=torch.int32).cuda(cfg.local_rank)
-    out_masks = torch.zeros((6, 1, 500), dtype=torch.bool).cuda(cfg.local_rank)
+    
+    
+    num_tasks = len(cfg.tasks)
+    obj_num = cfg.model['neck']['obj_num']
+    x_up = torch.zeros((batch_size, cfg.model['neck']['num_input_features'], 360, 360), dtype=torch.float32).cuda(cfg.local_rank)
+    out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float32).cuda(cfg.local_rank)
+    out_labels = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda(cfg.local_rank)
+    out_orders = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda(cfg.local_rank)
+    out_masks = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.bool).cuda(cfg.local_rank)
 
-    for i, data_batch in enumerate(data_loader):
+    for _, data_batch in enumerate(data_loader):
         device = torch.device(args.local_rank)
 
         example = example_to_device(data_batch, device, non_blocking=False)
@@ -144,11 +148,13 @@ def main():
                     "inputs" :
                     {'input_tensor': x},
                     "outputs" :
-                    {'ct_feat': ct_feat, 'center_pos_embedding': center_pos_embedding,
-                    'out_scores': out_scores, 'out_labels': out_labels,
+                    {'x_up': x_up, 'out_scores': out_scores, 'out_labels': out_labels,
                     'out_orders': out_orders, 'out_masks': out_masks}
                 }
                 run_trt_engine(cf_context, cf_engine, IO_tensors)
+                
+            with nvtx.annotate("embedding"):
+                ct_feat, center_pos_embedding = model.neck.embedding(x_up, out_orders)
             
             with nvtx.annotate("poolformer_forward"):
                 poolformer_output = model.neck.poolformer_forward(ct_feat, center_pos_embedding)
@@ -163,7 +169,7 @@ def main():
                             "labels": out_labels[idx],
                             "order": out_orders[idx],
                             "mask": out_masks[idx],
-                            "ct_feat": poolformer_output[:, :, idx * cfg.test_cfg['obj_num'] : (idx+1) * cfg.test_cfg['obj_num']],
+                            "ct_feat": poolformer_output[:, :, idx * obj_num : (idx+1) * obj_num],
                         }
                     )
                     out_dict_list.append(out_dict)
