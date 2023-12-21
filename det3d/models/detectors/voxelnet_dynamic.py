@@ -1,10 +1,7 @@
 from ..registry import DETECTORS
 from .single_stage import SingleStageDetector
-import torch 
 from torch.cuda.amp import autocast as autocast
 
-import nvtx
-import pickle
 
 @DETECTORS.register_module
 class VoxelNet_dynamic(SingleStageDetector):
@@ -22,63 +19,61 @@ class VoxelNet_dynamic(SingleStageDetector):
             reader, backbone, neck, bbox_head, train_cfg, test_cfg, pretrained
         )
         
-    def extract_feat(self, example):
-        with nvtx.annotate("reader"):
-            if 'voxels' not in example:
-                output = self.reader(example['points'])    
-                voxels, coors, shape = output 
-
-                # data = dict(
-                #     features=voxels,
-                #     coors=coors,
-                #     batch_size=len(example['points']),
-                #     input_shape=shape,
-                #     voxels=voxels
-                # )
-                
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/reader_output.pkl", 'wb') as handle:
-        #     pickle.dump(output, handle)
         
-        with nvtx.annotate("3D_backbone"):
-            # x, voxel_feature = self.backbone(
-            #         data['voxels'], data["coors"], data["batch_size"], data["input_shape"]
-            #     )
-            x, _ = self.backbone(voxels,coors, len(example['points']), shape)
+    def extract_feat(self, example):
+        if 'voxels' not in example:
+            output = self.reader(example['points'])    
+            voxels, coors, shape = output 
+        
+        x, _ = self.backbone(voxels,coors, len(example['points']), shape)
             
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/backbone_output.pkl", 'wb') as handle:
-        #     pickle.dump(x, handle)
-
         if self.with_neck:
             x = self.neck(x, example)
         
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/neck_output.pkl", 'wb') as handle:
-        #     pickle.dump(x, handle)
-        
         return x
 
-    # def forward(self, example, return_loss=True, **kwargs):
+
     def forward(self, example, return_loss=False):
-        
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/example.pkl", 'wb') as handle:
-        #     pickle.dump(example, handle)
-            
         x = self.extract_feat(example)
         
-        
-        with nvtx.annotate("bbox_head"):
-            preds = self.bbox_head(x)
+        preds = self.bbox_head(x)
+        if return_loss:
+            return self.bbox_head.loss(example, preds, self.test_cfg)
+        else:
+            return self.bbox_head.predict(example['metadata'], preds, self.test_cfg)
             
-        # with open("/workspace/centerformer/work_dirs/partition/sample_data/bbox_head_output.pkl", 'wb') as handle:
-        #     pickle.dump(preds, handle)
-                
-        with nvtx.annotate("post_processing"):
-            if return_loss:
-                return self.bbox_head.loss(example, preds, self.test_cfg)
-            else:
-                # temp = self.bbox_head.predict(example, preds, self.test_cfg)
-                # with open("/workspace/centerformer/work_dirs/partition/sample_data/predict_output.pkl", 'wb') as handle:
-                #     pickle.dump(temp, handle)
-                return self.bbox_head.predict(example['metadata'], preds, self.test_cfg)
+            
+    def extract_feat_baseline(self, example):
+        if 'voxels' not in example:
+            output = self.reader(example['points'])    
+            voxels, coors, shape = output 
+
+            data = dict(
+                features=voxels,
+                coors=coors,
+                batch_size=len(example['points']),
+                input_shape=shape,
+                voxels=voxels
+            )
+            
+        x, voxel_feature = self.backbone(
+                data['voxels'], data["coors"], data["batch_size"], data["input_shape"]
+            )
+
+        if self.with_neck:
+            x = self.neck(x, example)
+
+        return x, voxel_feature
+    
+
+    def forward_baseline(self, example, return_loss=True, **kwargs):
+        x, _ = self.extract_feat_baseline(example)
+        preds = self.bbox_head.forward_baseline(x)
+
+        if return_loss:
+            return self.bbox_head.loss(example, preds, self.test_cfg)
+        else:
+            return self.bbox_head.predict_baseline(example, preds, self.test_cfg)
 
 
     def forward_two_stage(self, example, return_loss=True, **kwargs):

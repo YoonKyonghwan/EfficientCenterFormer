@@ -21,7 +21,6 @@ import copy
 
 from det3d.core.utils.circle_nms_jit import circle_nms
 
-import nvtx
 
 class SepHead(nn.Module):
     def __init__(
@@ -160,6 +159,19 @@ class CenterHeadIoU_1d(nn.Module):
         logger.info("Finish CenterHeadIoU Initialization")
 
     def forward(self, x, *kwargs):
+        ret_dicts = []
+        if isinstance(x,list):
+            for idx, task in enumerate(self.tasks):
+                y = self.shared_conv(x[idx]["ct_feat"])
+                ret_dicts.append(task(x[idx], y))
+        else:
+            y = self.shared_conv(x["ct_feat"])
+            for idx, task in enumerate(self.tasks):
+                ret_dicts.append(task(x, y))
+                
+        return ret_dicts
+    
+    def forward_baseline(self, x, *kwargs):
         ret_dicts = []
         if isinstance(x,list):
             for idx, task in enumerate(self.tasks):
@@ -315,7 +327,6 @@ class CenterHeadIoU_1d(nn.Module):
         """decode, nms, then return the detection result. Additionaly support double flip testing"""
         # get loss info
         rets = []
-        metas = []
 
         post_center_range = test_cfg.post_center_limit_range
         if len(post_center_range) > 0:
@@ -326,37 +337,22 @@ class CenterHeadIoU_1d(nn.Module):
             )
         
         to_device = preds_dicts[0]["scores"].device
-        batch, _ = preds_dicts[0]["scores"].size()
+        batch, obj_num = preds_dicts[0]["scores"].size()
         H = 360
         W = 360
-        # batch, _, H, W = preds_dicts[0]["BEV_feat"].size()
         ys, xs = torch.meshgrid([torch.arange(0, H, device=to_device), torch.arange(0, W, device=to_device)])
         ys = ys.view(1, H, W).repeat(batch, 1, 1)
         xs = xs.view(1, H, W).repeat(batch, 1, 1)
         
+        batch_id = torch.zeros(batch, obj_num, dtype=torch.int32, device=to_device)
+        batch_id = batch_id + torch.arange(batch, dtype=torch.int32, device=to_device).view(-1, 1)
+
         for task_id, preds_dict in enumerate(preds_dicts):
             # convert B C N to B N C
             for key, val in preds_dict.items():
                 if torch.is_tensor(preds_dict[key]):
                     if len(preds_dict[key].shape) == 3:
                         preds_dict[key] = val.permute(0, 2, 1).contiguous()
-
-            # batch_size = preds_dict["scores"].shape[0]
-
-            if len(example_metadata) == 0:
-                # meta_list = [None] * batch_size
-                meta_list = [None] * batch
-                
-            else:
-                meta_list = example_metadata
-
-            batch_score = preds_dict["scores"]
-            batch_label = preds_dict["labels"]
-            batch_mask = preds_dict["mask"]
-            if self.use_iou_loss:
-                batch_iou = preds_dict["iou"].squeeze(2)
-            else:
-                batch_iou = None
 
             batch_dim = torch.exp(preds_dict["dim"])
 
@@ -367,17 +363,11 @@ class CenterHeadIoU_1d(nn.Module):
             batch_hei = preds_dict["height"]
             batch_rot = torch.atan2(batch_rots, batch_rotc)
             if self.use_iou_loss:
+                batch_iou = preds_dict["iou"].squeeze(2)
                 batch_iou = (batch_iou + 1) * 0.5
                 batch_iou = torch.clamp(batch_iou, min=0.0, max=1.0)
-                
-            # batch, _, H, W = preds_dict["hm"].size()
-            # ys, xs = torch.meshgrid([torch.arange(0, H), torch.arange(0, W)])
-            # ys = ys.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
-            # xs = xs.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
-            
-            obj_num = preds_dict["order"].shape[1]
-            batch_id = np.indices((batch, obj_num))[0]
-            batch_id = torch.from_numpy(batch_id).to(preds_dict["order"])
+            else:
+                batch_iou = None
 
             xs_2 = (
                 xs.view(batch, -1, 1)[batch_id, preds_dict["order"]]
@@ -399,12 +389,147 @@ class CenterHeadIoU_1d(nn.Module):
 
             if "vel" in preds_dict:
                 batch_vel = preds_dict["vel"]
+                batch_box_preds = torch.cat([xs_2, ys_2, batch_hei, batch_dim, batch_vel, batch_rot], dim=2)
+            else:
+                batch_box_preds = torch.cat([xs_2, ys_2, batch_hei, batch_dim, batch_rot], dim=2)
+
+            if test_cfg.get("per_class_nms", False):
+                pass
+            else:
+                rets.append(
+                    self.post_processing(
+                        batch_box_preds,
+                        preds_dict["scores"],
+                        preds_dict["labels"],
+                        test_cfg,
+                        post_center_range,
+                        task_id,
+                        preds_dict["mask"],
+                        batch_iou,
+                    )
+                )
+
+        # Merge branches results
+        num_samples = len(rets[0])
+
+        ret_list = []
+        for i in range(num_samples):
+            ret = {}
+            for k in rets[0][i].keys():
+                if k in [
+                    "box3d_lidar",
+                    "scores",
+                    "selected_box_mask",
+                    "gt_scores",
+                    "selected",
+                    "selected_feat_ids",
+                ]:
+                    ret[k] = torch.cat([ret[i][k] for ret in rets])
+                elif k in ["label_preds"]:
+                    flag = 0
+                    for j, num_class in enumerate(self.num_classes):
+                        rets[j][i][k] += flag
+                        flag += num_class
+                    ret[k] = torch.cat([ret[i][k] for ret in rets])
+
+            if len(example_metadata) == 0:
+                ret["metadata"] = None
+            else:
+                ret["metadata"] = example_metadata[i]
+            ret_list.append(ret)
+
+        return ret_list
+    
+    
+    @torch.no_grad()
+    def predict_baseline(self, example, preds_dicts, test_cfg, **kwargs):
+        """decode, nms, then return the detection result. Additionaly support double flip testing"""
+        # get loss info
+        rets = []
+        metas = []
+
+        post_center_range = test_cfg.post_center_limit_range
+        if len(post_center_range) > 0:
+            post_center_range = torch.tensor(
+                post_center_range,
+                dtype=preds_dicts[0]["scores"].dtype,
+                device=preds_dicts[0]["scores"].device,
+            )
+
+        for task_id, preds_dict in enumerate(preds_dicts):
+            # convert B C N to B N C
+            for key, val in preds_dict.items():
+                if torch.is_tensor(preds_dict[key]):
+                    if len(preds_dict[key].shape) == 3:
+                        preds_dict[key] = val.permute(0, 2, 1).contiguous()
+
+            batch_size = preds_dict["scores"].shape[0]
+
+            if "metadata" not in example or len(example["metadata"]) == 0:
+                meta_list = [None] * batch_size
+            else:
+                meta_list = example["metadata"]
+
+            batch_score = preds_dict["scores"]
+            batch_label = preds_dict["labels"]
+            batch_mask = preds_dict["mask"]
+            if self.use_iou_loss:
+                batch_iou = preds_dict["iou"].squeeze(2)
+            else:
+                batch_iou = None
+            if "corner_hm" in preds_dict:
+                batch_corner_hm = preds_dict["corner_hm"]
+            else:
+                batch_corner_hm = None
+
+            batch_dim = torch.exp(preds_dict["dim"])
+
+            batch_rots = preds_dict["rot"][..., 0:1]
+            batch_rotc = preds_dict["rot"][..., 1:2]
+
+            batch_reg = preds_dict["reg"]
+            batch_hei = preds_dict["height"]
+            batch_rot = torch.atan2(batch_rots, batch_rotc)
+            if self.use_iou_loss:
+                batch_iou = (batch_iou + 1) * 0.5
+                batch_iou = torch.clamp(batch_iou, min=0.0, max=1.0)
+
+            batch, _, H, W = preds_dict["hm"].size()
+
+            ys, xs = torch.meshgrid([torch.arange(0, H), torch.arange(0, W)])
+            ys = ys.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
+            xs = xs.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
+
+            obj_num = preds_dict["order"].shape[1]
+            batch_id = np.indices((batch, obj_num))[0]
+            batch_id = torch.from_numpy(batch_id).to(preds_dict["order"])
+
+            xs = (
+                xs.view(batch, -1, 1)[batch_id, preds_dict["order"]]
+                + batch_reg[:, :, 0:1]
+            )
+            ys = (
+                ys.view(batch, -1, 1)[batch_id, preds_dict["order"]]
+                + batch_reg[:, :, 1:2]
+            )
+
+            xs = (
+                xs * test_cfg.out_size_factor * test_cfg.voxel_size[0]
+                + test_cfg.pc_range[0]
+            )
+            ys = (
+                ys * test_cfg.out_size_factor * test_cfg.voxel_size[1]
+                + test_cfg.pc_range[1]
+            )
+
+            if "vel" in preds_dict:
+                batch_vel = preds_dict["vel"]
                 batch_box_preds = torch.cat(
-                    [xs_2, ys_2, batch_hei, batch_dim, batch_vel, batch_rot], dim=2
+                    [xs, ys, batch_hei, batch_dim, batch_vel, batch_rot], dim=2
                 )
             else:
                 batch_box_preds = torch.cat(
-                    [xs_2, ys_2, batch_hei, batch_dim, batch_rot], dim=2
+                    [xs, ys, batch_hei, batch_dim, batch_rot], dim=2
                 )
 
             metas.append(meta_list)
@@ -414,6 +539,7 @@ class CenterHeadIoU_1d(nn.Module):
             else:
                 rets.append(
                     self.post_processing(
+                        example,
                         batch_box_preds,
                         batch_score,
                         batch_label,
@@ -453,6 +579,7 @@ class CenterHeadIoU_1d(nn.Module):
             ret_list.append(ret)
 
         return ret_list
+    
 
     @torch.no_grad()
     def post_processing(
