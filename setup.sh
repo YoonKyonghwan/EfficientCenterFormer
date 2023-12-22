@@ -7,8 +7,17 @@ pip install --upgrade pip
 export TORCH_INSTALL=https://developer.download.nvidia.cn/compute/redist/jp/v511/pytorch/torch-2.0.0+nv23.05-cp38-cp38-linux_aarch64.whl
 pip install --no-cache $TORCH_INSTALL
 pip install -r requirements.txt
-pip install spconv-cu114
-pip install tensorrt==8.5.1.7;;
+
+mkdir dependencies
+cd dependencies
+git clone https://github.com/FindDefinition/cumm
+cd cumm/
+pip install -e .
+cd ..
+git clone https://github.com/traveller59/spconv
+cd spconv/
+sed -i 's/\, "cumm/\]\#\, "cumm/g' pyproject.toml # remove cumm requirement
+pip install -e .
 
 # build extensions
 cd det3d/ops/iou3d_nms

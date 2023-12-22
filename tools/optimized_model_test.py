@@ -119,7 +119,9 @@ def main():
     
     num_tasks = len(cfg.tasks)
     obj_num = cfg.model['neck']['obj_num']
-    x_up = torch.zeros((batch_size, cfg.model['neck']['num_input_features'], 360, 360), dtype=torch.float32).cuda(cfg.local_rank)
+    num_input_features = cfg.model['neck']['num_input_features']
+    ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda(cfg.local_rank)
+    center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda(cfg.local_rank)
     out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float32).cuda(cfg.local_rank)
     out_labels = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda(cfg.local_rank)
     out_orders = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda(cfg.local_rank)
@@ -146,15 +148,17 @@ def main():
                 # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
                 IO_tensors = {
                     "inputs" :
-                    {'input_tensor': x},
+                    {
+                        'input_tensor': x
+                    },
                     "outputs" :
-                    {'x_up': x_up, 'out_scores': out_scores, 'out_labels': out_labels,
-                    'out_orders': out_orders, 'out_masks': out_masks}
+                    {
+                        'ct_feat':ct_feat, 'center_pos_embedding': center_pos_embedding,
+                        'out_scores': out_scores, 'out_labels': out_labels,
+                        'out_orders': out_orders, 'out_masks': out_masks
+                    }
                 }
                 run_trt_engine(cf_context, cf_engine, IO_tensors)
-                
-            with nvtx.annotate("embedding"):
-                ct_feat, center_pos_embedding = model.neck.embedding(x_up, out_orders)
             
             with nvtx.annotate("poolformer_forward"):
                 poolformer_output = model.neck.poolformer_forward(ct_feat, center_pos_embedding)

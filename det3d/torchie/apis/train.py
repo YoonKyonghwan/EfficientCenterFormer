@@ -51,7 +51,6 @@ def example_to_device(example, device=None, non_blocking=False) -> dict:
     assert device is not None
 
     example_torch = {}
-    float_names = ["voxels", "bev_map"]
     for k, v in example.items():
         if k in ["anchors", "anchors_mask", "reg_targets", "reg_weights", "labels", 'points']:
             example_torch[k] = [res.to(device, non_blocking=non_blocking) for res in v]
