@@ -826,10 +826,12 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
                 corner_hm = torch.sigmoid(corner_hm)
 
             # find top K center location
-            hm = torch.sigmoid(hm)
+            # hm = torch.sigmoid(hm)
+            hm = 1 / (1 + torch.exp(-hm))
             batch, num_cls, H, W = hm.size()
-
-            scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1) 
+            
+            hm_temp = hm.reshape(batch, num_cls, H * W)
+            scores, labels = torch.max(hm_temp, dim=1) 
 
             order = torch.topk(scores, self.obj_num, dim=1, largest=True, sorted=True)[1]
 

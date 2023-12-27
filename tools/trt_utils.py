@@ -93,7 +93,7 @@ def engine_info(engine_filepath):
     return
 
 
-def build_engine_onnx(model_file, max_ws=1024*1024*1024, fp16=False, verbose=False):
+def build_engine_onnx(model_file, max_ws=2*1024*1024*1024, fp16=False, verbose=False):
     if verbose:
         TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
     else:

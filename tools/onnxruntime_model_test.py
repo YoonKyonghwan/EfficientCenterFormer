@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import nvtx
 import onnxruntime as ort
+import tensorrt as trt
 
 from det3d import torchie
 from det3d.datasets import build_dataloader, build_dataset
@@ -15,13 +16,14 @@ from det3d.torchie.apis.train import example_to_device
 from det3d.torchie.trainer import load_checkpoint
 from det3d.torchie.trainer.utils import all_gather, synchronize
 from torch.nn.parallel import DistributedDataParallel
+from tools.trt_utils import load_engine, run_trt_engine
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a detector")
-    parser.add_argument("--config", help="train config file path")
-    parser.add_argument("--work_dir", required=True, help="the dir to save logs and models")
-    parser.add_argument("--checkpoint", help="the dir to checkpoint which the model read from")
-    parser.add_argument("--centerfinder_onnx", help="the path of centerfinder onnx")
+    parser.add_argument("--config", help="train config file path", default="configs/nusc/nuscenes_centerformer_poolformer.py")
+    parser.add_argument("--work_dir", required=True, help="the dir to save logs and models", default="work_dirs/nuscenes_poolformer")
+    parser.add_argument("--checkpoint", help="the dir to checkpoint which the model read from", default="work_dirs/nuscenes_poolformer/poolformer.pth")
+    parser.add_argument("--centerfinder_trt", help="the path of centerfinder trt", default="work_dirs/partition/engine/findCenter_sanitized_fp32.trt")
     parser.add_argument("--gpus", type=int, default=1, help="number of gpus to use " "(only applicable to non-distributed training)")
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--testset", action="store_true")
@@ -31,24 +33,6 @@ def parse_args():
         os.environ["LOCAL_RANK"] = str(args.local_rank)
 
     return args
-
-def run_trt_engine(context, engine, tensors):
-    bindings = [None]*engine.num_bindings
-    for idx, binding in enumerate(engine):
-        tensor_name = engine.get_tensor_name(idx)
-        if engine.get_tensor_mode(binding)==trt.TensorIOMode.INPUT:
-            bindings[idx] = tensors['inputs'][tensor_name].data_ptr()
-            if context.get_tensor_shape(tensor_name):
-                context.set_input_shape(tensor_name, tensors['inputs'][tensor_name].shape)
-        else:
-            bindings[idx] = tensors['outputs'][tensor_name].data_ptr()
-    context.execute_v2(bindings=bindings)
-
-
-def load_engine(engine_filepath, trt_logger):
-    with open(engine_filepath, "rb") as f, trt.Runtime(trt_logger) as runtime:
-        engine = runtime.deserialize_cuda_engine(f.read())
-    return engine
 
 def main():
     args = parse_args()

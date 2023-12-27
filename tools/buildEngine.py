@@ -6,8 +6,8 @@ import os
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--onnx_path", help="the path for onnx (including file_name)")
-    parser.add_argument("--engine_dir", help="the dir to save engine file (save as onnx_name.trt)")
+    parser.add_argument("--onnx_path", help="the path for onnx (including file_name)", default="work_dirs/partition/onnx/findCenter_sanitized.onnx")
+    parser.add_argument("--engine_dir", help="the dir to save engine file (save as onnx_name.trt)", default="work_dirs/partition/engine")
     parser.add_argument("--fp16", action='store_true', help="whether to use fp16")
     parser.add_argument("--verbose", action='store_true', help="whether to use verbose mode")
     args = parser.parse_args()

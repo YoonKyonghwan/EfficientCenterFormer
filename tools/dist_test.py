@@ -32,10 +32,10 @@ def save_pred(pred, root):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a detector")
-    parser.add_argument("config", help="train config file path")
-    parser.add_argument("--work_dir", required=True, help="the dir to save logs and models")
+    parser.add_argument("--config", help="train config file path", default="configs/nusc/nuscenes_centerformer_poolformer.py")
+    parser.add_argument("--work_dir", help="the dir to save logs and models", default="work_dirs/nuscenes_poolformer")
     parser.add_argument(
-        "--checkpoint", help="the dir to checkpoint which the model read from"
+        "--checkpoint", help="the dir to checkpoint which the model read from", default="work_dirs/nuscenes_poolformer/poolformer.pth"
     )
     parser.add_argument(
         "--txt_result",

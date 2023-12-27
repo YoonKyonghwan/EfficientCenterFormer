@@ -13,10 +13,10 @@ import numpy as np
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", help="train config file path")
-    parser.add_argument("--checkpoint", help="the dir to checkpoint which the model read from")
-    parser.add_argument("--onnx_dir", help="the dir to save the onnx")
-    parser.add_argument("--onnx_name", help="the name of onnx")
+    parser.add_argument("--config", help="train config file path", default="configs/nusc/nuscenes_centerformer_poolformer.py")
+    parser.add_argument("--checkpoint", help="the dir to checkpoint which the model read from", default="work_dirs/nuscenes_poolformer/poolformer.pth")
+    parser.add_argument("--onnx_dir", help="the dir to save the onnx", default="work_dirs/partition/onnx")
+    parser.add_argument("--onnx_name", help="the name of onnx", default="findCenter")
     parser.add_argument("--sanitize", action='store_true', help="whether to sanitize the onnx model")
     args = parser.parse_args()
     return args
@@ -53,7 +53,7 @@ def main():
                 export_params=True, 
                 do_constant_folding=True,
                 opset_version=17,
-                # operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                # operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN,
                 verbose=True,
                 )
     onnx.checker.check_model(onnx.load(onnx_path))
