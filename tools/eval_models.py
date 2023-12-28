@@ -40,7 +40,7 @@ def main():
         assert args.backbone_onnx is not None, "Please specify the path of backbone onnx"
     
     if args.dataset == "nuscenes":
-        if args.opt_mode == "baseline":
+        if args.model_type == "baseline":
             config = "configs/nusc/nuscenes_centerformer_baseline.py"
             checkpoint = "work_dirs/checkpoint/nuscenes_baseline.pth"
         else: # poolformer
@@ -112,7 +112,7 @@ def main():
     
     if args.backbone_opt:
         inference_type = "fp16"  # fp16 or int8
-        backbone_model = pyscn.SCNModel("", inference_type)
+        backbone_model = pyscn.SCNModel(args.backbone_onnx, inference_type)
 
     print("start inference")
     prog_bar = torchie.ProgressBar(len(data_loader.dataset))
@@ -132,7 +132,11 @@ def main():
                 voxels, coors, shape = reader_output
                 if args.backbone_opt:
                     #To do
-                    x, _ = backbone_model.forward(voxels, coors, len(example_points), shape)
+                    voxels = voxels.cpu().numpy()
+                    coors = coors.cpu().numpy()
+                    shape = shape.tolist()
+                    
+                    x, _ = backbone_model.forward(voxels, coors, shape, len(example_points))
                     pass
                 else:
                     x, _ = model.backbone(voxels, coors, len(example_points), shape)
