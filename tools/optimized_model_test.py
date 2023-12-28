@@ -15,29 +15,37 @@ from det3d.torchie.trainer import load_checkpoint
 from det3d.torchie.trainer.utils import all_gather, synchronize
 from trt_utils import load_engine, run_trt_engine
 import pickle
+import pyscn
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a detector")
-    parser.add_argument("--work_dir", help="the dir to save logs and models", default="work_dirs/nuscenes_poolformer_opt")
-    parser.add_argument("--centerfinder_trt", help="the path of centerfinder trt engine", default="work_dirs/partition/engine/findCenter_sanitized_fp32.trt")
-    parser.add_argument("--testset", action="store_true", help="whether to use test set for evaluation")
-    parser.add_argument("--opt_mode", help="baseline or poolformer", default="poolformer_trt", choices=['baseline', 'poolformer', 'poolformer_mem_opt', 'poolformer_trt'])
     parser.add_argument("--dataset", help= "nuscenes or waymo", default="nuscenes", choices=['waymo', 'nuscenes'])
-
+    parser.add_argument("--work_dir", help="the dir to save logs and models", default="work_dirs/nuscenes_poolformer_opt")
+    parser.add_argument("--model_type", help="baseline or poolformer", default="poolformer", choices=['baseline', 'poolformer'])
+    parser.add_argument("--mem_opt", action="store_true", help="whether to use memory optimization for poolformer")
+    parser.add_argument("--trt", action="store_true", help="whether to use trt for centerfinder")
+    parser.add_argument("--centerfinder_trt", help="the path of centerfinder trt engine", default="work_dirs/partition/engine/findCenter_sanitized_fp32.trt")
+    parser.add_argument("--backbone_opt", action="store_true", help="whether to use backbone optimization")
+    parser.add_argument("--backbone_onnx", help="the path of backbone onnx", default="work_dirs/partition/onnx/backbone_ptq.onnx")
+    parser.add_argument("--testset", action="store_true", help="whether to use test set for evaluation")
     args = parser.parse_args()
     return args
 
 
 def main():
     args = parse_args()
+    if args.trt:
+        assert args.centerfinder_trt is not None, "Please specify the path of centerfinder trt engine"
+    if args.backbone_opt:
+        assert args.backbone_onnx is not None, "Please specify the path of backbone onnx"
     
     if args.dataset == "nuscenes":
         if args.opt_mode == "baseline":
             config = "configs/nusc/nuscenes_centerformer_baseline.py"
-            checkpoint = "work_dirs/checkpoint/baseline.pth"
+            checkpoint = "work_dirs/checkpoint/nuscenes_baseline.pth"
         else: # poolformer
             config = "configs/nusc/nuscenes_centerformer_poolformer.py"
-            checkpoint = "work_dirs/checkpoint/poolformer.pth"
+            checkpoint = "work_dirs/checkpoint/nuscenes_poolformer.pth"
     else :
         print("not implemented yet for waymo")
         NotImplementedError
@@ -85,7 +93,7 @@ def main():
         shuffle=False,
     )
 
-    if args.opt_mode == "poolformer_trt":
+    if args.trt:
         # load centerfinder trt engine and allocate buffers
         TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
         centerFinder_engine_path = args.centerfinder_trt
@@ -101,6 +109,10 @@ def main():
         out_labels = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
         out_orders = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
         out_masks = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.bool).cuda()
+    
+    if args.backbone_opt:
+        inference_type = "fp16"  # fp16 or int8
+        backbone_model = pyscn.SCNModel("", inference_type)
 
     print("start inference")
     prog_bar = torchie.ProgressBar(len(data_loader.dataset))
@@ -118,18 +130,18 @@ def main():
                 
             with nvtx.annotate("3D_backbone"):
                 voxels, coors, shape = reader_output
-                x, _ = model.backbone(voxels, coors, len(example_points), shape)
+                if args.backbone_opt:
+                    #To do
+                    x, _ = backbone_model.forward(voxels, coors, len(example_points), shape)
+                    pass
+                else:
+                    x, _ = model.backbone(voxels, coors, len(example_points), shape)
             
-            if args.opt_mode == "baseline":
+            if args.model_type == "baseline":
                 out_dict_list = model.neck(x)
-            else:
-                with nvtx.annotate("find_centers"): #choices=['poolformer', 'poolformer_mem_opt', 'poolformer_trt']
-                    if args.opt_mode == "poolformer":
-                        ct_feat, center_pos_embedding, out_dict_list = model.neck.find_centers_baseline(x)
-                    elif args.opt_mode == "poolformer_mem_opt":
-                        ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
-                    elif args.opt_mode == "poolformer_trt":
-                        # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
+            else: # poolformer
+                with nvtx.annotate("find_centers"): 
+                    if args.trt:
                         IO_tensors = {
                             "inputs" :
                             {
@@ -143,24 +155,28 @@ def main():
                             }
                         }
                         run_trt_engine(cf_context, cf_engine, IO_tensors)
+                    elif args.mem_opt:
+                        ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
+                    else:
+                        ct_feat, center_pos_embedding, out_dict_list = model.neck.find_centers_baseline(x)
                 
                 with nvtx.annotate("poolformer_forward"):
-                    if args.opt_mode == "poolformer":
-                        out_dict_list = model.neck.poolformer_baseline(ct_feat, center_pos_embedding, out_dict_list)
-                    elif args.opt_mode == "poolformer_mem_opt" or args.opt_mode == "poolformer_trt":
+                    if args.mem_opt:
                         out_dict_list = model.neck.poolformer(ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks)
+                    else:
+                        out_dict_list = model.neck.poolformer_baseline(ct_feat, center_pos_embedding, out_dict_list)
             
             with nvtx.annotate("bbox_head"):
-                if args.opt_mode == "baseline" or args.opt_mode == "poolformer":
-                    preds = model.bbox_head.forward_baseline(out_dict_list)
-                else: # poolformer_mem_opt or poolformer_trt
+                if args.mem_opt:
                     preds = model.bbox_head(out_dict_list)
+                else:
+                    preds = model.bbox_head.forward_baseline(out_dict_list)
                 
             with nvtx.annotate("post_processing"):
-                if args.opt_mode == "baseline" or args.opt_mode == "poolformer":
-                    outputs = model.bbox_head.predict_baseline(example_metadata, preds, model.test_cfg)
-                else: # poolformer_mem_opt or poolformer_trt
+                if args.mem_opt:
                     outputs = model.bbox_head.predict(example_metadata, preds, model.test_cfg)
+                else:
+                    outputs = model.bbox_head.predict_baseline(example_metadata, preds, model.test_cfg)
             
         for output in outputs:
             token = output["metadata"]["token"]
