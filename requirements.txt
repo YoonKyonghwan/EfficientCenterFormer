@@ -8,6 +8,6 @@ nuscenes-devkit
 einops    
 nvtx      
 onnx
-onnxruntime-gpu
-# spconv-cu118         
-# tensorrt==8.5.1.7                                                                   
+pandas
+torchvision==0.15.1
+tensorrt==8.5.1.7                                                                   

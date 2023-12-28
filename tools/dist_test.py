@@ -1,23 +1,16 @@
 import argparse
 import copy
-import json
 import os
-import sys
 
 import numpy as np
 import torch
-import yaml
 from det3d import torchie
 from det3d.datasets import build_dataloader, build_dataset
 from det3d.models import build_detector
 from det3d.torchie import Config
 from det3d.torchie.apis import (
     batch_processor,
-    build_optimizer,
     get_root_logger,
-    init_dist,
-    set_random_seed,
-    train_detector,
 )
 from det3d.torchie.trainer import get_dist_info, load_checkpoint
 from det3d.torchie.trainer.utils import all_gather, synchronize
@@ -35,13 +28,7 @@ def parse_args():
     parser.add_argument("--config", help="train config file path", default="configs/nusc/nuscenes_centerformer_poolformer.py")
     parser.add_argument("--work_dir", help="the dir to save logs and models", default="work_dirs/nuscenes_poolformer")
     parser.add_argument(
-        "--checkpoint", help="the dir to checkpoint which the model read from", default="work_dirs/nuscenes_poolformer/poolformer.pth"
-    )
-    parser.add_argument(
-        "--txt_result",
-        type=bool,
-        default=False,
-        help="whether to save results to standard KITTI format of txt type",
+        "--checkpoint", help="the dir to checkpoint which the model read from", default="work_dirs/checkpoint/poolformer.pth"
     )
     parser.add_argument(
         "--gpus",
@@ -49,13 +36,6 @@ def parse_args():
         default=1,
         help="number of gpus to use " "(only applicable to non-distributed training)",
     )
-    parser.add_argument(
-        "--launcher",
-        choices=["none", "pytorch", "slurm", "mpi"],
-        default="none",
-        help="job launcher",
-    )
-    parser.add_argument("--speed_test", action="store_true")
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--testset", action="store_true")
 
@@ -67,12 +47,6 @@ def parse_args():
 
 
 def main():
-
-    # torch.manual_seed(0)
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
-    # np.random.seed(0)
-
     args = parse_args()
 
     cfg = Config.fromfile(args.config)
@@ -120,7 +94,7 @@ def main():
 
     data_loader = build_dataloader(
         dataset,
-        batch_size=cfg.data.samples_per_gpu if not args.speed_test else 1,
+        batch_size=cfg.data.samples_per_gpu,
         workers_per_gpu=cfg.data.workers_per_gpu,
         dist=distributed,
         shuffle=False,
@@ -207,7 +181,7 @@ def main():
     if not os.path.exists(args.work_dir):
         os.makedirs(args.work_dir)
 
-    save_pred(predictions, args.work_dir)
+    # save_pred(predictions, args.work_dir)
 
     result_dict, _ = dataset.evaluation(copy.deepcopy(predictions), output_dir=args.work_dir, testset=args.testset)
 
@@ -215,8 +189,6 @@ def main():
         for k, v in result_dict["results"].items():
             print(f"Evaluation {k}: {v}")
 
-    if args.txt_result:
-        assert False, "No longer support kitti"
 
 if __name__ == "__main__":
     main()

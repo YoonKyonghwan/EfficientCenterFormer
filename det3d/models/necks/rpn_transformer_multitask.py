@@ -717,7 +717,7 @@ class RPN_transformer_deformable_multitask(RPN_transformer_base_multitask):
                 pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
 
 
-        with nvtx.annotate("transformer_forward"):
+        with nvtx.annotate("transformer"):
             transformer_out = self.transformer_layer(
                 ct_feat,
                 self.pos_embedding,
@@ -884,10 +884,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
         final_tensor = torch.stack([row_tensor] * rows)
         return final_tensor
     
-
-    def forward(self, x, example=None):        
-        ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x)
-        
+    def poolformer(self, ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks):
         poolformer_output = self.poolformer_forward(ct_feat, center_pos_embedding)
         
         out_dict_list = []
@@ -903,10 +900,14 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
                 }
             )
             out_dict_list.append(out_dict)
-        
+        return out_dict_list
+
+    def forward(self, x, example=None):        
+        ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x)
+        out_dict_list = self.poolformer(ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks)
         return out_dict_list
     
-    def forward_baseline(self, x, example=None):
+    def findcenter_baseline(self, x, example=None):
         # FPN
         x = self.blocks[0](x)
         x_down = self.blocks[1](x)
@@ -1017,7 +1018,10 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
 
         if self.pos_embedding is not None:
             center_pos_embedding = self.pos_embedding(pos_features)
-            
+        
+        return ct_feat, center_pos_embedding, out_dict_list
+    
+    def poolformer_baseline(self, ct_feat, center_pos_embedding, out_dict_list):
         poolformer_output = self.poolformer_forward(ct_feat, center_pos_embedding)
 
         ct_feat = (
@@ -1026,5 +1030,9 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
 
         for idx, task in enumerate(self.tasks):
             out_dict_list[idx]["ct_feat"] = ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
-
+        return out_dict_list
+    
+    def forward_baseline(self, x, example=None):
+        ct_feat, center_pos_embedding, out_dict_list = self.findcenter_baseline(x)
+        out_dict_list = self.poolformer_baseline(ct_feat, center_pos_embedding, out_dict_list)
         return out_dict_list
