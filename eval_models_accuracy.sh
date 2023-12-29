@@ -12,6 +12,11 @@ profile_model() {
     local additional_args=$2
     local output_dir_suffix=$3
 
+    # Create output directory
+    if [ ! -d "$RESULT_DIR" ]; then
+        mkdir -p $RESULT_DIR
+    fi
+
     echo "$model_type"
     python tools/eval_models.py --eval_mode=$EVAL_MODE --dataset=$DATASET \
         --work_dir=$RESULT_DIR/$output_dir_suffix \

@@ -1,9 +1,6 @@
-# check the number of arguments
-if [ $# -ne 1 ]; then
-    echo "Please input the path of nuscenes dataset"
-    exit 1
-fi
+#!/bin/bash
 
+# check the number of arguments
 echo "This setup.sh works for Jetson Orin Nano with Jetpack 5.1.2"
 echo "Please make sure you have installed Jetpack 5.1.2 and CUDA 11.4"
 echo "If you have other Hardware and Software, please modify this file accordingly"
@@ -15,10 +12,6 @@ pip install -r requirements.txt
 
 export CUMM_CUDA_VERSION="11.4"
 export CUMM_CUDA_ARCH_LIST="8.7"
-
-mkdir -p data/nuscenes
-cd data/nuscenes
-ln -s $1
 
 mkdir dependencies
 cd dependencies
@@ -51,7 +44,3 @@ export PATH=$PATH:/usr/local/cuda/bin
 export CUDA_PATH=/usr/local/cuda
 export CUDA_HOME=/usr/local/cuda
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
-
-python tools/export_findCenter_onnx.py --sanitize
-python tools/buildEngine.py
-python tools/buildEngine.py --fp16
