@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define constants
-PROFILE_DELAY=125
+PROFILE_DELAY=6
 EVAL_MODE="time"
 RESULT_DIR="analysis/results/$EVAL_MODE"
 DATASET="nuscenes"
@@ -12,7 +12,12 @@ profile_model() {
     local additional_args=$2
     local output_dir_suffix=$3
 
-    echo "$model_type"
+    # Create output directory
+    if [ ! -d "$RESULT_DIR" ]; then
+        mkdir -p $RESULT_DIR
+    fi
+
+    echo "$model_type" "$additional_args"
     nsys profile --delay=$PROFILE_DELAY -t nvtx --force-overwrite=true --stats=true \
         --output=$RESULT_DIR/$output_dir_suffix \
         python tools/eval_models.py --eval_mode=$EVAL_MODE --dataset=$DATASET \

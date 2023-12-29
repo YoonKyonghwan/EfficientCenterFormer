@@ -54,3 +54,4 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
 
 python tools/export_findCenter_onnx.py --sanitize
 python tools/buildEngine.py
+python tools/buildEngine.py --fp16
