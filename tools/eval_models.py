@@ -1,3 +1,7 @@
+import time
+START_TIME = time.time()
+CHECK_PREPARATION_TIME = False
+
 import argparse
 import copy
 import os
@@ -19,20 +23,22 @@ import pyscn
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a detector")
+    parser.add_argument("--eval_mode", help="time or accuracy", default="time", choices=['time', 'accuracy'])
     parser.add_argument("--dataset", help= "nuscenes or waymo", default="nuscenes", choices=['waymo', 'nuscenes'])
     parser.add_argument("--work_dir", help="the dir to save logs and models", default="work_dirs/nuscenes_poolformer_opt")
     parser.add_argument("--model_type", help="baseline or poolformer", default="poolformer", choices=['baseline', 'poolformer'])
     parser.add_argument("--mem_opt", action="store_true", help="whether to use memory optimization for poolformer")
     parser.add_argument("--trt", action="store_true", help="whether to use trt for centerfinder")
+    parser.add_argument("--trt_fp16", action="store_true", help="whether to use fp16 for trt")
     parser.add_argument("--centerfinder_trt", help="the path of centerfinder trt engine", default="work_dirs/partition/engine/findCenter_sanitized_fp32.trt")
     parser.add_argument("--backbone_opt", action="store_true", help="whether to use backbone optimization")
-    parser.add_argument("--backbone_onnx", help="the path of backbone onnx", default="work_dirs/partition/onnx/backbone_ptq.onnx")
+    parser.add_argument("--backbone_onnx", help="the path of backbone onnx", default="work_dirs/partition/onnx/backbone.onnx")
     parser.add_argument("--testset", action="store_true", help="whether to use test set for evaluation")
     args = parser.parse_args()
     return args
 
-
 def main():
+
     args = parse_args()
     if args.trt:
         assert args.centerfinder_trt is not None, "Please specify the path of centerfinder trt engine"
@@ -51,6 +57,14 @@ def main():
         NotImplementedError
         
     cfg = Config.fromfile(config)
+    
+    if args.eval_mode == "time":
+        cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_time_analysis.pkl"
+        cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_time_analysis.pkl"
+    else: # accuracy
+        cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
+        cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
+    print(cfg.val_anno)
 
     # update configs according to CLI args
     if args.work_dir is not None:
@@ -92,23 +106,32 @@ def main():
         dist=False,
         shuffle=False,
     )
+    print(len(data_loader))
 
     if args.trt:
         # load centerfinder trt engine and allocate buffers
         TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
         centerFinder_engine_path = args.centerfinder_trt
+        if args.trt_fp16:
+            centerFinder_engine_path = centerFinder_engine_path.replace("fp32", "fp16")
         cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
         cf_context = cf_engine.create_execution_context()
         
         num_tasks = len(cfg.tasks)
         obj_num = cfg.model['neck']['obj_num']
         num_input_features = cfg.model['neck']['num_input_features']
-        ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
-        center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
-        out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float32).cuda()
+        
         out_labels = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
         out_orders = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
         out_masks = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.bool).cuda()
+        if args.trt_fp16:
+            ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.half).cuda()
+            center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.half).cuda()
+            out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.half).cuda()
+        else:
+            ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
+            center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
+            out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float32).cuda()
     
     if args.backbone_opt:
         inference_type = "fp16"  # fp16 or int8
@@ -131,15 +154,19 @@ def main():
             with nvtx.annotate("3D_backbone"):
                 voxels, coors, shape = reader_output
                 if args.backbone_opt:
-                    #To do
+                    # x_org = model.backbone(voxels, coors, len(example_points), shape)[0]
+                    
                     voxels = voxels.cpu().numpy()
                     coors = coors.cpu().numpy()
                     shape = shape.tolist()
-                    
-                    x, _ = backbone_model.forward(voxels, coors, shape, len(example_points))
-                    pass
+                    x_opt = backbone_model.forward(voxels, coors, [41,1440,1440], 0)[0]
+                    if args.trt_fp16:
+                        x_opt = torch.from_numpy(x_opt).to(dtype=torch.half).cuda()
+                    else:
+                        x_opt = torch.from_numpy(x_opt).to(dtype=torch.float32).cuda()
+                    # torch.testing.assert_close(x_org, x_opt)
                 else:
-                    x, _ = model.backbone(voxels, coors, len(example_points), shape)
+                    x = model.backbone(voxels, coors, len(example_points), shape)[0]
             
             if args.model_type == "baseline":
                 out_dict_list = model.neck(x)
@@ -194,6 +221,13 @@ def main():
             )
             
             prog_bar.update()
+        
+        if not CHECK_PREPARATION_TIME:
+            CHECK_PREPARATION_TIME = True
+            print("time for preparation: ", time.time() - START_TIME)
+            
+    if args.eval_mode == "time":
+        return
 
     print("synchronize")
     synchronize()
@@ -207,14 +241,15 @@ def main():
     for p in all_predictions:
         predictions.update(p)
         
+    if not os.path.exists(args.work_dir):
+        os.makedirs(args.work_dir)
+        
     with open(os.path.join(args.work_dir, "prediction.pkl"), "wb") as f:
         pickle.dump(predictions, f)
 
-    if not os.path.exists(args.work_dir):
-        os.makedirs(args.work_dir)
 
-    print("evaluation")
-    result_dict, _ = dataset.evaluation(copy.deepcopy(predictions), output_dir=args.work_dir, testset=args.testset)
+    # print("evaluation")
+    # result_dict, _ = dataset.evaluation(copy.deepcopy(predictions), output_dir=args.work_dir, testset=args.testset)
 
 if __name__ == "__main__":
     main()
