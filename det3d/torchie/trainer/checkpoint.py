@@ -1,7 +1,6 @@
 import os
 import os.path as osp
 import pkgutil
-import time
 import warnings
 from collections import OrderedDict
 from importlib import import_module

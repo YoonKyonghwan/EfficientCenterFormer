@@ -24,6 +24,7 @@ def get_dist_info():
         initialized = dist._initialized
     else:
         initialized = dist.is_initialized()
+        # initialized = dist.is_available()
     if initialized:
         rank = dist.get_rank()
         world_size = dist.get_world_size()

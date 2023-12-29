@@ -1,5 +1,4 @@
 import platform
-from functools import partial
 
 from det3d.torchie.parallel import collate, collate_kitti
 from det3d.torchie.trainer import get_dist_info
@@ -8,7 +7,6 @@ from torch.utils.data import DataLoader
 from .sampler import (
     DistributedGroupSampler,
     DistributedSampler,
-    DistributedSamplerV2,
     GroupSampler,
 )
 

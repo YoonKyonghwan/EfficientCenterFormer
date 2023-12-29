@@ -23,5 +23,6 @@ core.*
 *.png
 *.nsys-rep
 *.sqlite
+dependencies/
 
 centerformer_back

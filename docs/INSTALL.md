@@ -1,26 +1,28 @@
 ## Installation
-Modified from [CenterFormer](https://github.com/TuSimple/centerformer)
+This project builds upon [CenterFormer](https://github.com/TuSimple/centerformer). If you encounter any issues during installation or setup, we recommend referring to the detailed instructions provided by CenterFormer. You can also explore solutions to common problems by browsing the issues in their repository.
 
-Our experiments are tested on the following environments:
-- H/W: Orin Nano
-- Jetpack: 5.1.2
-    - Python: 3.8.10
-    - PyTorch: 2.0.0+nv23.05
-    - CUDA: 11.4
-    - tensorRT: 8.5.2
+Our experiments have been successfully tested under the following hardware and software configurations:
+- **HardWare**: Orin Nano
+- **Software**
+    - Jetpack: 5.1.2
+        - Python: 3.8.10
+        - PyTorch: 2.0.0+nv23.05
+        - CUDA: 11.4
+        - tensorRT: 8.5.2
 
-### Installation & Setup
+### Steps for Installation and Setup
+
+1. **Create a Virtual Environment**
 ```bash
-# create virtual environment and install dependencies
-python -m venv venv
-source venv/bin/activate
-sh setup.sh
+python -m venv ecf
+source ecf/bin/activate
 ```
 
+2. Run the Setup Script
 ```bash
-# add the project directory to PYTHONPATH (by adding the following line to ~/.bashrc)
-# change the path accordingly
-export PYTHONPATH="${PYTHONPATH}:PATH_TO_PRJECT"
+. setup_orinNano.sh
 ```
+- The [setup_orinNano.sh](setup_orinNano.sh) script includes commands to temporarily set environment variables necessary for the project.
 
-Most of the libaraies are the same as [CenterFormer](https://github.com/TuSimple/centerformer). If you run into any issues, you can also refer to their detailed instructions and search from the issues in their repo.
+3. (Optional) Update ~/.bashrc for Permanent Environment Variable Changes:
+If you wish to add the project directory to your environment variables permanently, you can append the relevant line to your ~/.bashrc file. This step ensures that the environment variables are set up automatically in every new terminal session.

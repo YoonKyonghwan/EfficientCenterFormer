@@ -1,8 +1,5 @@
 from ..registry import DETECTORS
 from .single_stage import SingleStageDetector
-from det3d.torchie.trainer import load_checkpoint
-import torch 
-from copy import deepcopy
 from torch.cuda.amp import autocast as autocast
 
 @DETECTORS.register_module
