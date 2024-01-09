@@ -16,18 +16,18 @@ export CUMM_CUDA_ARCH_LIST="8.7"
 mkdir dependencies
 cd dependencies
 # intstall cumm & spconv
-git clone https://github.com/FindDefinition/cumm
+git clone -b tag/v0.4.11 https://github.com/FindDefinition/cumm
 cd cumm/
 pip install -e .
 cd ..
 git clone https://github.com/traveller59/spconv 
 cd spconv/
-sed -i 's/\, "cumm/\]\#\, "cumm/g' pyproject.toml # remove cumm requirement
+sed -i 's/\, "cumm/\] \#\, "cumm/g' pyproject.toml # remove cumm requirement
 pip install -e .
 cd ..
-# build Optimized_SDsparseconvolution
+# build Optimized_3DSparseConvolution
 git clone --recursive https://github.com/NVIDIA-AI-IOT/Lidar_AI_Solution
-cd Lidar_AI_Solution/libraries/3DSparseConvolution/tool
+cd Lidar_AI_Solution/libraries/3DSparseConvolution
 make pyscn -j8 
 
 # build extensions
@@ -44,3 +44,4 @@ export PATH=$PATH:/usr/local/cuda/bin
 export CUDA_PATH=/usr/local/cuda
 export CUDA_HOME=/usr/local/cuda
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
+export LD_PRELOAD=/ssd/jwher96/cf/lib/python3.8/site-packages/scikit_learn.libs/libgomp-d22c30c5.so.1.0.0
