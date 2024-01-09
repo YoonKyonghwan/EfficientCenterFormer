@@ -1,6 +1,11 @@
 import argparse
 import copy
 import os
+try:
+    import apex
+except:
+    print("No APEX!")
+import sys
 
 import numpy as np
 import torch
@@ -36,7 +41,14 @@ def parse_args():
         default=1,
         help="number of gpus to use " "(only applicable to non-distributed training)",
     )
-    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument(
+        "--launcher",
+        choices=["none", "pytorch", "slurm", "mpi"],
+        default="none",
+        help="job launcher",
+    )
+    parser.add_argument("--speed_test", action="store_true")
+    parser.add_argument("--local-rank", type=int, default=0)
     parser.add_argument("--testset", action="store_true")
 
     args = parser.parse_args()

@@ -1,0 +1,42 @@
+2023-12-31 09:44:10,356 - INFO - Distributed training: False
+2023-12-31 09:44:10,356 - INFO - torch.backends.cudnn.benchmark: False
+2023-12-31 09:44:10,608 - INFO - Finish RPN_transformer_deformable Initialization
+2023-12-31 09:44:10,609 - INFO - num_classes: [3]
+2023-12-31 09:44:10,617 - INFO - Finish CenterHeadIoU Initialization
+2023-12-31 09:44:13,237 - INFO - {'VEHICLE': 5, 'PEDESTRIAN': 5, 'CYCLIST': 5}
+2023-12-31 09:44:13,239 - INFO - [-1]
+2023-12-31 09:44:29,880 - INFO - load 1087711 VEHICLE database infos
+2023-12-31 09:44:29,880 - INFO - load 1018200 PEDESTRIAN database infos
+2023-12-31 09:44:29,880 - INFO - load 49518 CYCLIST database infos
+2023-12-31 09:44:35,851 - INFO - After filter database:
+2023-12-31 09:44:35,854 - INFO - load 1020135 VEHICLE database infos
+2023-12-31 09:44:35,854 - INFO - load 947838 PEDESTRIAN database infos
+2023-12-31 09:44:35,854 - INFO - load 47534 CYCLIST database infos
+Use HM Bias:  -2.19
+Using 1 sweeps
+Using 158081 Frames
+use gt label assigning kernel size  1
+Traceback (most recent call last):
+  File "/home/jwher96/EfficientCenterFormer/tools/train.py", line 137, in <module>
+    main()
+  File "/home/jwher96/EfficientCenterFormer/tools/train.py", line 126, in main
+    train_detector(
+  File "/home/jwher96/EfficientCenterFormer/det3d/torchie/apis/train.py", line 370, in train_detector
+    model = model.cuda()
+  File "/root/miniconda3/envs/cf/lib/python3.9/site-packages/torch/nn/modules/module.py", line 918, in cuda
+    return self._apply(lambda t: t.cuda(device))
+  File "/root/miniconda3/envs/cf/lib/python3.9/site-packages/torch/nn/modules/module.py", line 810, in _apply
+    module._apply(fn)
+  File "/root/miniconda3/envs/cf/lib/python3.9/site-packages/torch/nn/modules/module.py", line 810, in _apply
+    module._apply(fn)
+  File "/root/miniconda3/envs/cf/lib/python3.9/site-packages/torch/nn/modules/module.py", line 810, in _apply
+    module._apply(fn)
+  File "/root/miniconda3/envs/cf/lib/python3.9/site-packages/torch/nn/modules/module.py", line 833, in _apply
+    param_applied = fn(param)
+  File "/root/miniconda3/envs/cf/lib/python3.9/site-packages/torch/nn/modules/module.py", line 918, in <lambda>
+    return self._apply(lambda t: t.cuda(device))
+RuntimeError: CUDA error: the provided PTX was compiled with an unsupported toolchain.
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1.
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+

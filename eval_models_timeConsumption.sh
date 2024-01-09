@@ -35,3 +35,20 @@ profile_model "poolformer" "--mem_opt --trt --trt_fp16 --backbone_opt" "backbone
 # Completion message
 echo "profiling done"
 echo "ready to analyze results by analysis/timeAnalysis.ipynb"
+exit 0
+
+# nusc baseline
+nsys profile --delay=6 -t nvtx --force-overwrite=true --stats=true --output=analysis/results/time/nusc_baseline \
+python tools/eval_models.py --eval_mode=time --dataset=nusc --model_type=baseline
+
+# nusc poolformer
+nsys profile --delay=6 -t nvtx --force-overwrite=true --stats=true --output=analysis/results/time/nusc_poolformer \
+python tools/eval_models.py --eval_mode=time --dataset=nusc --model_type=poolformer
+
+# waymo baseline
+nsys profile --delay=6 -t nvtx --force-overwrite=true --stats=true --output=analysis/results/time/waymo_baseline \
+python tools/eval_models.py --eval_mode=time --dataset=waymo --model_type=baseline
+
+# waymo poolformer
+nsys profile --delay=6 -t nvtx --force-overwrite=true --stats=true --output=analysis/results/time/waymo_poolformer \
+python tools/eval_models.py --eval_mode=time --dataset=waymo --model_type=poolformer

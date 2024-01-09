@@ -49,18 +49,36 @@ def main():
         if args.model_type == "baseline":
             config = "configs/nusc/nuscenes_centerformer_baseline.py"
             checkpoint = "work_dirs/checkpoint/nuscenes_baseline.pth"
-        else: # poolformer
+        elif args.model_type == "poolformer":
             config = "configs/nusc/nuscenes_centerformer_poolformer.py"
             checkpoint = "work_dirs/checkpoint/nuscenes_poolformer.pth"
+        else:
+            print(f"not implemented yet for model type[{args.model_type}]")
+            NotImplementedError
+    elif args.dataset == "waymo":
+        if args.model_type == "baseline":
+            config = "configs/waymo/waymo_centerformer_deformable.py"
+            checkpoint = "work_dirs/waymo_centerformer_deformable/latest.pth"
+        elif args.model_type == "poolformer":
+            config = "configs/waymo/waymo_centerformer_poolformer.py"
+            checkpoint = "work_dirs/checkpoint/waymo_centerformer_poolformer.pth"
+        else:
+            print(f"not implemented yet for model type[{args.model_type}]")
+            NotImplementedError
     else :
-        print("not implemented yet for waymo")
+        print(f"not implemented yet for other datasets[{args.dataset}]")
         NotImplementedError
         
     cfg = Config.fromfile(config)
     
     if args.eval_mode == "time":
-        cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_time_analysis.pkl"
-        cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_time_analysis.pkl"
+        # nusc
+        # cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_time_analysis.pkl"
+        # cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_time_analysis.pkl"
+
+        # waymo
+        cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt.pkl"
+        cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt.pkl"
     else: # accuracy
         cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
         cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
@@ -225,9 +243,10 @@ def main():
         if not CHECK_PREPARATION_TIME:
             CHECK_PREPARATION_TIME = True
             print("time for preparation: ", time.time() - START_TIME)
-            
-    if args.eval_mode == "time":
-        return
+
+    # eval time and acc both            
+    # if args.eval_mode == "time":
+    #     return
 
     print("synchronize")
     synchronize()

@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 from det3d.torchie.cnn import xavier_init
 from det3d.models.utils import Sequential
-from det3d.models.utils import Transformer, Deform_Transformer
+from det3d.models.utils import Transformer, Deform_Transformer, Poolformer
 
 from .. import builder
 from ..registry import NECKS
@@ -1088,5 +1088,174 @@ class RPN_transformer_deformable_mtf(RPN_transformer_base):
             out_dict.update({"out_attention": transformer_out["out_attention"]})
         if self.corner and self.corner_head.training:
             out_dict.update({"corner_hm": corner_hm})
+
+        return out_dict
+
+
+@NECKS.register_module
+class RPN_poolformer(RPN_transformer_base):
+    def __init__(
+        self,
+        layer_nums,  # [2,2,2]
+        ds_num_filters,  # [128,256,64]
+        num_input_features,  # 256
+        transformer_config=None,
+        hm_head_layer=2,
+        corner_head_layer=2,
+        corner=False,
+        assign_label_window_size=1,
+        classes=3,
+        use_gt_training=False,
+        norm_cfg=None,
+        name="rpn_poolformer",
+        logger=None,
+        init_bias=-2.19,
+        score_threshold=0.1,
+        obj_num=500,
+        parametric_embedding=False,
+        **kwargs
+    ):
+        super(RPN_poolformer, self).__init__(
+            layer_nums,
+            ds_num_filters,
+            num_input_features,
+            transformer_config,
+            hm_head_layer,
+            corner_head_layer,
+            corner,
+            assign_label_window_size,
+            classes,
+            use_gt_training,
+            norm_cfg,
+            logger,
+            init_bias,
+            score_threshold,
+            obj_num,
+        )
+
+        self.transformer_layer = Poolformer(
+            self._num_filters[-1] * 2,
+            depth=transformer_config.depth,
+            # heads=transformer_config.heads,
+            # dim_head=transformer_config.dim_head,
+            mlp_dim=transformer_config.MLP_dim,
+            dropout=transformer_config.DP_rate,
+            # out_attention=transformer_config.out_att,
+            n_points=transformer_config.get("n_points", 9),
+        )
+        self.pos_embedding_type = transformer_config.get(
+            "pos_embedding_type", "linear"
+        )
+        if self.pos_embedding_type == "linear":
+            self.pos_embedding = nn.Linear(2, self._num_filters[-1] * 2)
+            # You may need len(self.tasks)>1
+            # self.pos_embedding = nn.Linear(3, self._num_filters[-1] * 2)
+        else:
+            raise NotImplementedError()
+        self.parametric_embedding = parametric_embedding
+        if self.parametric_embedding:
+            self.query_embed = nn.Embedding(self.obj_num, self._num_filters[-1] * 2)
+            nn.init.uniform_(self.query_embed.weight, -1.0, 1.0)
+
+        logger.info("Finish RPN_poolformer Initialization")
+
+    def find_centers(self, x, example=None):
+        # FPN
+        x = self.blocks[0](x)
+        x_down = self.blocks[1](x)
+        x_up = torch.cat([self.blocks[2](x_down), self.up(x)], dim=1)
+
+        # heatmap head
+        hm = self.hm_head(x_up)
+
+        if self.corner and self.corner_head.training:
+            corner_hm = self.corner_head(x_up)
+            corner_hm = torch.sigmoid(corner_hm)
+
+        # find top K center location
+        hm = torch.sigmoid(hm)
+        batch, num_cls, H, W = hm.size()
+
+        scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
+        self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num))[0]).to(
+            labels
+        )
+
+        if self.use_gt_training and self.hm_head.training:
+            gt_inds = example["ind"][0][:, (self.window_size // 2) :: self.window_size]
+            gt_masks = example["mask"][0][
+                :, (self.window_size // 2) :: self.window_size
+            ]
+            batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
+                labels
+            )
+            scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
+            order = scores.sort(1, descending=True)[1]
+            order = order[:, : self.obj_num]
+            scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
+        else:
+            order = scores.sort(1, descending=True)[1]
+            order = order[:, : self.obj_num]
+
+        scores = torch.gather(scores, 1, order)
+        labels = torch.gather(labels, 1, order)
+        mask = scores > self.score_threshold
+
+        ct_feat = (
+            x_up.reshape(batch, -1, H * W)
+            .transpose(2, 1)
+            .contiguous()[self.batch_id, order]
+        )  # B, 500, C
+
+        # create position embedding for each center
+        y_coor = order // W
+
+        # What is different between below one line and under three line?
+        # x_coor = order % W
+        x_coor = order - y_coor * W
+        y_coor, x_coor = y_coor.to(ct_feat), x_coor.to(ct_feat)
+        y_coor, x_coor = y_coor / H, x_coor / W
+
+        pos_features = torch.stack([x_coor, y_coor], dim=2)
+
+        # if self.parametric_embedding:
+        #     ct_feat = self.query_embed.weight
+        #     ct_feat = ct_feat.unsqueeze(0).expand(batch, -1, -1)
+        if self.pos_embedding is not None:
+            center_pos_embedding = self.pos_embedding(pos_features)
+
+        out_dict = {
+            "hm": hm,
+            "scores": scores,
+            "labels": labels,
+            "order": order,
+            # "ct_feat": ct_feat,
+            "mask": mask,
+            "BEV_feat": x_up,
+            "H": H,
+            "W": W,
+        }
+        if self.corner and self.corner_head.training:
+            out_dict.update({"corner_hm": corner_hm})
+        return ct_feat, center_pos_embedding, out_dict
+
+    def poolformer(self, ct_feat, center_pos_embedding): # , out_scores, out_labels, out_orders, out_masks):
+        poolformer_out = self.transformer_layer(ct_feat, center_pos_embedding)  # (B,N,C)
+        poolformer_out = poolformer_out.transpose(2, 1).contiguous()  # B, C, 500
+        return poolformer_out
+
+
+    def forward(self, x, example=None):
+        ct_feat, center_pos_embedding, out_dict = self.find_centers(x)
+
+        poolformer_out = self.poolformer(ct_feat, center_pos_embedding) # , out_scores, out_labels, out_orders, out_masks)
+
+        ct_feat = (
+            poolformer_out["ct_feat"].transpose(2, 1).contiguous()
+        )  # B, C, 500
+
+        out_dict.update({"ct_feat": ct_feat})
+        if "out_attention" in poolformer_out:
+            out_dict.update({"out_attention": poolformer_out["out_attention"]})
 
         return out_dict
