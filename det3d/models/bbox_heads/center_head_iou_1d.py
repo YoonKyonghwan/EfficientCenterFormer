@@ -369,6 +369,17 @@ class CenterHeadIoU_1d(nn.Module):
             else:
                 batch_iou = None
 
+            # TODO: Address poolformer compatibility
+            # The current implementation seamlessly integrates with tools/eval_models.py,
+            # where predict_baseline is explicitly invoked.
+            # However, issues may arise when employing tools/dist_test.py.
+            # To ensure compatibility, consider modifying the code to explicitly call predict_baseline
+            # at line 43 in det3d/models/detectors/voxelnet_dynamic.py.
+            batch, _, H, W = preds_dict["hm"].size()
+            ys, xs = torch.meshgrid([torch.arange(0, H), torch.arange(0, W)])
+            ys = ys.view(1, H, W).repeat(batch, 1, 1).to(to_device)
+            xs = xs.view(1, H, W).repeat(batch, 1, 1).to(to_device)
+
             xs_2 = (
                 xs.view(batch, -1, 1)[batch_id, preds_dict["order"]]
                 + batch_reg[:, :, 0:1]
@@ -495,7 +506,6 @@ class CenterHeadIoU_1d(nn.Module):
                 batch_iou = torch.clamp(batch_iou, min=0.0, max=1.0)
 
             batch, _, H, W = preds_dict["hm"].size()
-
             ys, xs = torch.meshgrid([torch.arange(0, H), torch.arange(0, W)])
             ys = ys.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
             xs = xs.view(1, H, W).repeat(batch, 1, 1).to(batch_score)
