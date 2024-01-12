@@ -27,7 +27,7 @@ model = dict(
     backbone=dict(
         type="SpMiddleResNetFHD", num_input_features=5, ds_factor=8),
     neck=dict(
-        type="RPN_transformer_deformable",
+        type="RPN_poolformer",
         layer_nums=[5, 5, 1],
         ds_num_filters=[256, 256, 128],
         num_input_features=256,

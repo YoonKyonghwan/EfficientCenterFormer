@@ -105,7 +105,7 @@ test_cfg = dict(
 # dataset settings
 dataset_type = "NuScenesDataset"
 nsweeps = 10
-data_root = "data/nuscenes"
+data_root = "data/nuscenes/"
 
 db_sampler = dict(
     type="GT-AUG",

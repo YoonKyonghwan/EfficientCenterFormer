@@ -99,7 +99,7 @@ test_cfg = dict(
 # dataset settings
 dataset_type = "WaymoDataset"
 nsweeps = 1
-data_root = "data/Waymo"
+data_root = "data/Waymo/"
 
 db_sampler = dict(
     type="GT-AUG",
