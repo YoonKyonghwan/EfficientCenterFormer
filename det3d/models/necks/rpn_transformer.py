@@ -1181,21 +1181,21 @@ class RPN_poolformer(RPN_transformer_base):
             labels
         )
 
-        if self.use_gt_training and self.hm_head.training:
-            gt_inds = example["ind"][0][:, (self.window_size // 2) :: self.window_size]
-            gt_masks = example["mask"][0][
-                :, (self.window_size // 2) :: self.window_size
-            ]
-            batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
-                labels
-            )
-            scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
-            order = scores.sort(1, descending=True)[1]
-            order = order[:, : self.obj_num]
-            scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
-        else:
-            order = scores.sort(1, descending=True)[1]
-            order = order[:, : self.obj_num]
+        # if self.use_gt_training and self.hm_head.training:
+        #     gt_inds = example["ind"][0][:, (self.window_size // 2) :: self.window_size]
+        #     gt_masks = example["mask"][0][
+        #         :, (self.window_size // 2) :: self.window_size
+        #     ]
+        #     batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
+        #         labels
+        #     )
+        #     scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
+        #     order = scores.sort(1, descending=True)[1]
+        #     order = order[:, : self.obj_num]
+        #     scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
+        # else:
+        order = scores.sort(1, descending=True)[1]
+        order = order[:, : self.obj_num]
 
         scores = torch.gather(scores, 1, order)
         labels = torch.gather(labels, 1, order)
@@ -1250,12 +1250,14 @@ class RPN_poolformer(RPN_transformer_base):
 
         poolformer_out = self.poolformer(ct_feat, center_pos_embedding) # , out_scores, out_labels, out_orders, out_masks)
 
-        ct_feat = (
-            poolformer_out["ct_feat"].transpose(2, 1).contiguous()
-        )  # B, C, 500
+        # already processed in self.poolformer
+        # ct_feat = (
+        #     poolformer_out["ct_feat"].transpose(2, 1).contiguous()
+        # )  # B, C, 500
 
-        out_dict.update({"ct_feat": ct_feat})
-        if "out_attention" in poolformer_out:
-            out_dict.update({"out_attention": poolformer_out["out_attention"]})
+        # out_dict.update({"ct_feat": ct_feat})
+        # if "out_attention" in poolformer_out:
+        #     out_dict.update({"out_attention": poolformer_out["out_attention"]})
+        out_dict.update({"ct_feat": poolformer_out})
 
         return out_dict
