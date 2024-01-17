@@ -1163,6 +1163,9 @@ class RPN_poolformer(RPN_transformer_base):
 
         logger.info("Finish RPN_poolformer Initialization")
 
+    def find_centers_baseline(self, x, example=None):
+        return self.find_centers(x, example)
+
     def find_centers(self, x, example=None):
         # FPN
         x = self.blocks[0](x)
@@ -1242,6 +1245,12 @@ class RPN_poolformer(RPN_transformer_base):
         if self.corner and self.corner_head.training:
             out_dict.update({"corner_hm": corner_hm})
         return ct_feat, center_pos_embedding, out_dict
+
+    def poolformer_baseline(self, ct_feat, center_pos_embedding, out_dict):
+        with nvtx.annotate("transformer"):
+            poolformer_out = self.poolformer(ct_feat, center_pos_embedding)
+        out_dict.update({"ct_feat": poolformer_out})
+        return out_dict
 
     def poolformer(self, ct_feat, center_pos_embedding): # , out_scores, out_labels, out_orders, out_masks):
         poolformer_out = self.transformer_layer(ct_feat, center_pos_embedding)  # (B,N,C)
