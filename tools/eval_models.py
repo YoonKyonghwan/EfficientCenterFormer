@@ -1,6 +1,3 @@
-import time
-START_TIME = time.time()
-CHECK_PREPARATION_TIME = False
 
 import argparse
 import copy
@@ -160,11 +157,7 @@ def main():
                     coors = coors.cpu().numpy()
                     shape = shape.tolist()
                     x_opt = backbone_model.forward(voxels, coors, [41,1440,1440], 0)[0]
-                    if args.trt_fp16:
-                        x_opt = torch.from_numpy(x_opt).to(dtype=torch.half).cuda()
-                    else:
-                        x_opt = torch.from_numpy(x_opt).to(dtype=torch.float32).cuda()
-                    # torch.testing.assert_close(x_org, x_opt)
+                    x = torch.from_numpy(x_opt).to(dtype=torch.float32).cuda()
                 else:
                     x = model.backbone(voxels, coors, len(example_points), shape)[0]
             
@@ -173,6 +166,8 @@ def main():
             else: # poolformer
                 with nvtx.annotate("find_centers"): 
                     if args.trt:
+                        if args.trt_fp16:
+                            x = x.to(dtype=torch.half)
                         IO_tensors = {
                             "inputs" :
                             {
@@ -186,6 +181,10 @@ def main():
                             }
                         }
                         run_trt_engine(cf_context, cf_engine, IO_tensors)
+                        if args.trt_fp16:
+                            ct_feat = ct_feat.to(dtype=torch.float32)
+                            center_pos_embedding = center_pos_embedding.to(dtype=torch.float32)
+                            out_scores = out_scores.to(dtype=torch.float32)
                     elif args.mem_opt:
                         ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
                     else:
@@ -221,10 +220,6 @@ def main():
             )
             
             prog_bar.update()
-        
-        if not CHECK_PREPARATION_TIME:
-            CHECK_PREPARATION_TIME = True
-            print("time for preparation: ", time.time() - START_TIME)
             
     if args.eval_mode == "time":
         return
