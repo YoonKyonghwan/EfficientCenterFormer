@@ -44,4 +44,5 @@ export PATH=$PATH:/usr/local/cuda/bin
 export CUDA_PATH=/usr/local/cuda
 export CUDA_HOME=/usr/local/cuda
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64
-export LD_PRELOAD=/ssd/jwher96/cf/lib/python3.8/site-packages/scikit_learn.libs/libgomp-d22c30c5.so.1.0.0
+export LD_PRELOAD=$(cd "$(dirname $(which python))/.."; pwd)/lib/python3.8/site-packages/scikit_learn.libs/libgomp-d22c30c5.so.1.0.0
+
