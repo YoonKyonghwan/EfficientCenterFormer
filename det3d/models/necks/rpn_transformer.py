@@ -14,6 +14,8 @@ from .. import builder
 from ..registry import NECKS
 from ..utils import build_norm_layer
 
+import nvtx
+
 
 class ChannelAttention(nn.Module):
     def __init__(self, in_planes, ratio=16):
@@ -763,95 +765,97 @@ class RPN_transformer_deformable(RPN_transformer_base):
 
     def forward(self, x, example=None):
 
-        # FPN
-        x = self.blocks[0](x)
-        x_down = self.blocks[1](x)
-        x_up = torch.cat([self.blocks[2](x_down), self.up(x)], dim=1)
+        with nvtx.annotate("find_centers"):
+            # FPN
+            x = self.blocks[0](x)
+            x_down = self.blocks[1](x)
+            x_up = torch.cat([self.blocks[2](x_down), self.up(x)], dim=1)
 
-        # heatmap head
-        hm = self.hm_head(x_up)
+            # heatmap head
+            hm = self.hm_head(x_up)
 
-        if self.corner and self.corner_head.training:
-            corner_hm = self.corner_head(x_up)
-            corner_hm = torch.sigmoid(corner_hm)
+            if self.corner and self.corner_head.training:
+                corner_hm = self.corner_head(x_up)
+                corner_hm = torch.sigmoid(corner_hm)
 
-        # find top K center location
-        hm = torch.sigmoid(hm)
-        batch, num_cls, H, W = hm.size()
+            # find top K center location
+            hm = torch.sigmoid(hm)
+            batch, num_cls, H, W = hm.size()
 
-        scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
-        self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num))[0]).to(
-            labels
-        )
-
-        if self.use_gt_training and self.hm_head.training:
-            gt_inds = example["ind"][0][:, (self.window_size // 2) :: self.window_size]
-            gt_masks = example["mask"][0][
-                :, (self.window_size // 2) :: self.window_size
-            ]
-            batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
+            scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
+            self.batch_id = torch.from_numpy(np.indices((batch, self.obj_num))[0]).to(
                 labels
             )
-            scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
-            order = scores.sort(1, descending=True)[1]
-            order = order[:, : self.obj_num]
-            scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
-        else:
-            order = scores.sort(1, descending=True)[1]
-            order = order[:, : self.obj_num]
 
-        scores = torch.gather(scores, 1, order)
-        labels = torch.gather(labels, 1, order)
-        mask = scores > self.score_threshold
+            if self.use_gt_training and self.hm_head.training:
+                gt_inds = example["ind"][0][:, (self.window_size // 2) :: self.window_size]
+                gt_masks = example["mask"][0][
+                    :, (self.window_size // 2) :: self.window_size
+                ]
+                batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
+                    labels
+                )
+                scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
+                order = scores.sort(1, descending=True)[1]
+                order = order[:, : self.obj_num]
+                scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
+            else:
+                order = scores.sort(1, descending=True)[1]
+                order = order[:, : self.obj_num]
 
-        ct_feat = (
-            x_up.reshape(batch, -1, H * W)
-            .transpose(2, 1)
-            .contiguous()[self.batch_id, order]
-        )  # B, 500, C
+            scores = torch.gather(scores, 1, order)
+            labels = torch.gather(labels, 1, order)
+            mask = scores > self.score_threshold
 
-        # create position embedding for each center
-        y_coor = order // W
-        x_coor = order - y_coor * W
-        y_coor, x_coor = y_coor.to(ct_feat), x_coor.to(ct_feat)
-        y_coor, x_coor = y_coor / H, x_coor / W
-        pos_features = torch.stack([x_coor, y_coor], dim=2)
-
-        if self.parametric_embedding:
-            ct_feat = self.query_embed.weight
-            ct_feat = ct_feat.unsqueeze(0).expand(batch, -1, -1)
-
-        # run transformer
-        src = torch.cat(
-            (
-                x_up.reshape(batch, -1, H * W).transpose(2, 1).contiguous(),
-                x.reshape(batch, -1, (H * W) // 4).transpose(2, 1).contiguous(),
-                x_down.reshape(batch, -1, (H * W) // 16)
+            ct_feat = (
+                x_up.reshape(batch, -1, H * W)
                 .transpose(2, 1)
-                .contiguous(),
-            ),
-            dim=1,
-        )  # B ,sum(H*W), C
-        spatial_shapes = torch.as_tensor(
-            [(H, W), (H // 2, W // 2), (H // 4, W // 4)],
-            dtype=torch.long,
-            device=ct_feat.device,
-        )
-        level_start_index = torch.cat(
-            (
-                spatial_shapes.new_zeros((1,)),
-                spatial_shapes.prod(1).cumsum(0)[:-1],
-            )
-        )
+                .contiguous()[self.batch_id, order]
+            )  # B, 500, C
 
-        transformer_out = self.transformer_layer(
-            ct_feat,
-            self.pos_embedding,
-            src,
-            spatial_shapes,
-            level_start_index,
-            center_pos=pos_features,
-        )  # (B,N,C)
+            # create position embedding for each center
+            y_coor = order // W
+            x_coor = order - y_coor * W
+            y_coor, x_coor = y_coor.to(ct_feat), x_coor.to(ct_feat)
+            y_coor, x_coor = y_coor / H, x_coor / W
+            pos_features = torch.stack([x_coor, y_coor], dim=2)
+
+            if self.parametric_embedding:
+                ct_feat = self.query_embed.weight
+                ct_feat = ct_feat.unsqueeze(0).expand(batch, -1, -1)
+
+            # run transformer
+            src = torch.cat(
+                (
+                    x_up.reshape(batch, -1, H * W).transpose(2, 1).contiguous(),
+                    x.reshape(batch, -1, (H * W) // 4).transpose(2, 1).contiguous(),
+                    x_down.reshape(batch, -1, (H * W) // 16)
+                    .transpose(2, 1)
+                    .contiguous(),
+                ),
+                dim=1,
+            )  # B ,sum(H*W), C
+            spatial_shapes = torch.as_tensor(
+                [(H, W), (H // 2, W // 2), (H // 4, W // 4)],
+                dtype=torch.long,
+                device=ct_feat.device,
+            )
+            level_start_index = torch.cat(
+                (
+                    spatial_shapes.new_zeros((1,)),
+                    spatial_shapes.prod(1).cumsum(0)[:-1],
+                )
+            )
+
+        with nvtx.annotate("transformer"):
+            transformer_out = self.transformer_layer(
+                ct_feat,
+                self.pos_embedding,
+                src,
+                spatial_shapes,
+                level_start_index,
+                center_pos=pos_features,
+            )  # (B,N,C)
 
         ct_feat = (
             transformer_out["ct_feat"].transpose(2, 1).contiguous()
@@ -1159,6 +1163,9 @@ class RPN_poolformer(RPN_transformer_base):
 
         logger.info("Finish RPN_poolformer Initialization")
 
+    def find_centers_baseline(self, x, example=None):
+        return self.find_centers(x, example)
+
     def find_centers(self, x, example=None):
         # FPN
         x = self.blocks[0](x)
@@ -1238,6 +1245,12 @@ class RPN_poolformer(RPN_transformer_base):
         if self.corner and self.corner_head.training:
             out_dict.update({"corner_hm": corner_hm})
         return ct_feat, center_pos_embedding, out_dict
+
+    def poolformer_baseline(self, ct_feat, center_pos_embedding, out_dict):
+        with nvtx.annotate("transformer"):
+            poolformer_out = self.poolformer(ct_feat, center_pos_embedding)
+        out_dict.update({"ct_feat": poolformer_out})
+        return out_dict
 
     def poolformer(self, ct_feat, center_pos_embedding): # , out_scores, out_labels, out_orders, out_masks):
         poolformer_out = self.transformer_layer(ct_feat, center_pos_embedding)  # (B,N,C)

@@ -57,11 +57,11 @@ def main():
             NotImplementedError
     elif args.dataset == "waymo":
         if args.model_type == "baseline":
-            config = "configs/waymo/waymo_centerformer_deformable.py"
-            checkpoint = "work_dirs/waymo_centerformer_deformable/latest.pth"
+            config = "configs/waymo/voxelnet/waymo_centerformer_deformable.py"
+            checkpoint = "work_dirs/checkpoint/waymo_baseline.pth"
         elif args.model_type == "poolformer":
-            config = "configs/waymo/waymo_centerformer_poolformer.py"
-            checkpoint = "work_dirs/checkpoint/waymo_centerformer_poolformer.pth"
+            config = "configs/waymo/voxelnet/waymo_centerformer_poolformer.py"
+            checkpoint = "work_dirs/checkpoint/waymo_poolformer.pth"
         else:
             print(f"not implemented yet for model type[{args.model_type}]")
             NotImplementedError
@@ -73,15 +73,23 @@ def main():
     
     if args.eval_mode == "time":
         # nusc
-        # cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_time_analysis.pkl"
-        # cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_time_analysis.pkl"
+        if args.dataset == "nuscenes":
+            cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_time_analysis.pkl"
+            cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_time_analysis.pkl"
 
         # waymo
-        cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt.pkl"
-        cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt.pkl"
+        elif args.dataset == "waymo":
+            cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt_time_analysis.pkl"
+            cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt_time_analysis.pkl"
     else: # accuracy
-        cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
-        cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
+        # nusc
+        if args.dataset == "nuscenes":
+            cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
+            cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_accuracy_analysis.pkl"
+
+        # waymo
+        elif args.dataset == "waymo":
+            NotImplementedError
     print(cfg.val_anno)
 
     # update configs according to CLI args
@@ -239,7 +247,8 @@ def main():
             )
             
             prog_bar.update()
-        
+       
+        global CHECK_PREPARATION_TIME 
         if not CHECK_PREPARATION_TIME:
             CHECK_PREPARATION_TIME = True
             print("time for preparation: ", time.time() - START_TIME)

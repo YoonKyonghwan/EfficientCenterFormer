@@ -10,4 +10,4 @@ nvtx
 onnx
 pandas
 torchvision==0.15.1
-tensorrt==8.5.1.7                                                                   
+# tensorrt==8.5.1.7                                                                   

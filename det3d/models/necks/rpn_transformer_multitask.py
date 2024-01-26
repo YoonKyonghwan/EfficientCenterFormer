@@ -727,12 +727,12 @@ class RPN_transformer_deformable_multitask(RPN_transformer_base_multitask):
                 center_pos=pos_features,
             )  # (B,N,C)
 
-            ct_feat = (
-                transformer_out["ct_feat"].transpose(2, 1).contiguous()
-            )  # B, C, 500
+        ct_feat = (
+            transformer_out["ct_feat"].transpose(2, 1).contiguous()
+        )  # B, C, 500
 
-            for idx, task in enumerate(self.tasks):
-                out_dict_list[idx]["ct_feat"] = ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
+        for idx, task in enumerate(self.tasks):
+            out_dict_list[idx]["ct_feat"] = ct_feat[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
 
         return out_dict_list
 
@@ -868,7 +868,8 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
     
 
     def poolformer_forward(self, ct_feat, center_pos):
-        transformer_out = self.transformer_layer(ct_feat,center_pos)  # (B,N,C)
+        with nvtx.annotate("transformer"):
+            transformer_out = self.transformer_layer(ct_feat,center_pos)  # (B,N,C)
         transformer_out = transformer_out.transpose(2, 1).contiguous()  # B, C, 500
         return transformer_out
     
