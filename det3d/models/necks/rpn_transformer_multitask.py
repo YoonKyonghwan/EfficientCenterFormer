@@ -903,7 +903,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             out_dict_list.append(out_dict)
         return out_dict_list
 
-    def forward_infer(self, x, example=None):        
+    def forward(self, x, example=None):        
         ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x)
         out_dict_list = self.poolformer(ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks)
         return out_dict_list
@@ -930,21 +930,22 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
 
             scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
 
-            # if self.use_gt_training and self.hm_heads[0].training:
-            #     gt_inds = example["ind"][idx][:, (self.window_size // 2) :: self.window_size]
-            #     gt_masks = example["mask"][idx][
-            #         :, (self.window_size // 2) :: self.window_size
-            #     ]
-            #     batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
-            #         labels
-            #     )
-            #     scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
-            #     order = scores.sort(1, descending=True)[1]
-            #     order = order[:, : self.obj_num]
-            #     scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
-            # else:
-            order = scores.sort(1, descending=True)[1]
-            order = order[:, : self.obj_num]
+            if self.use_gt_training and self.hm_heads[0].training:
+                print("Not entered while infer")
+                gt_inds = example["ind"][idx][:, (self.window_size // 2) :: self.window_size]
+                gt_masks = example["mask"][idx][
+                    :, (self.window_size // 2) :: self.window_size
+                ]
+                batch_id_gt = torch.from_numpy(np.indices((batch, gt_inds.shape[1]))[0]).to(
+                    labels
+                )
+                scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] + gt_masks
+                order = scores.sort(1, descending=True)[1]
+                order = order[:, : self.obj_num]
+                scores[batch_id_gt, gt_inds] = scores[batch_id_gt, gt_inds] - gt_masks
+            else:
+                order = scores.sort(1, descending=True)[1]
+                order = order[:, : self.obj_num]
 
             scores = torch.gather(scores, 1, order)
             labels = torch.gather(labels, 1, order)
@@ -1029,7 +1030,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             out_dict_list[idx]["ct_feat"] = poolformer_output[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
         return out_dict_list
     
-    def forward(self, x, example=None):
+    def forward_baseline(self, x, example=None):
         # You should use this function while training
         ct_feat, center_pos_embedding, out_dict_list = self.find_centers_baseline(x)
         out_dict_list = self.poolformer_baseline(ct_feat, center_pos_embedding, out_dict_list)

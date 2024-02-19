@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use("Agg") # remove GTK error
 import time
 START_TIME = time.time()
 CHECK_PREPARATION_TIME = False
@@ -32,8 +34,9 @@ def parse_args():
     parser.add_argument("--trt_fp16", action="store_true", help="whether to use fp16 for trt")
     parser.add_argument("--centerfinder_trt", help="the path of centerfinder trt engine", default="work_dirs/partition/engine/findCenter_sanitized_fp32.trt")
     parser.add_argument("--backbone_opt", action="store_true", help="whether to use backbone optimization")
-    parser.add_argument("--backbone_onnx", help="the path of backbone onnx", default="work_dirs/partition/onnx/backbone.onnx")
+    parser.add_argument("--backbone_onnx", help="the path of backbone onnx", default="work_dirs/partition/onnx/poolformer.scn.onnx")
     parser.add_argument("--testset", action="store_true", help="whether to use test set for evaluation")
+    parser.add_argument("--verbose", action="store_true", help="Print a thorough diff report, which may result in slower execution")
     args = parser.parse_args()
     return args
 
@@ -68,6 +71,7 @@ def main():
     else :
         print(f"not implemented yet for other datasets[{args.dataset}]")
         NotImplementedError
+    print(f"pth file: {checkpoint}")
         
     cfg = Config.fromfile(config)
     
@@ -89,7 +93,8 @@ def main():
 
         # waymo
         elif args.dataset == "waymo":
-            NotImplementedError
+            cfg.data["val"]["info_path"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt.pkl"
+            cfg.data["val"]["ann_file"] = cfg.data_root + "infos_val_01sweeps_filter_zero_gt.pkl"
     print(cfg.val_anno)
 
     # update configs according to CLI args
@@ -140,24 +145,27 @@ def main():
         centerFinder_engine_path = args.centerfinder_trt
         if args.trt_fp16:
             centerFinder_engine_path = centerFinder_engine_path.replace("fp32", "fp16")
+        print(centerFinder_engine_path)
         cf_engine = load_engine(centerFinder_engine_path, TRT_LOGGER)
         cf_context = cf_engine.create_execution_context()
         
         num_tasks = len(cfg.tasks)
         obj_num = cfg.model['neck']['obj_num']
         num_input_features = cfg.model['neck']['num_input_features']
+
+        # ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = create_output_tensor(num_tasks, batch_size, obj_num, num_input_features, args.trt_fp16)
         
-        out_labels = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
-        out_orders = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
-        out_masks = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.bool).cuda()
-        if args.trt_fp16:
-            ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.half).cuda()
-            center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.half).cuda()
-            out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.half).cuda()
-        else:
-            ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
-            center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
-            out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float32).cuda()
+        # out_labels = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
+        # out_orders = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
+        # out_masks = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.bool).cuda()
+        # if args.trt_fp16:
+        #     ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float16).cuda()
+        #     center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float16).cuda()
+        #     out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float16).cuda()
+        # else:
+        #     ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
+        #     center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
+        #     out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float32).cuda()
     
     if args.backbone_opt:
         inference_type = "fp16"  # fp16 or int8
@@ -180,23 +188,36 @@ def main():
             with nvtx.annotate("3D_backbone"):
                 voxels, coors, shape = reader_output
                 if args.backbone_opt:
-                    # x_org = model.backbone(voxels, coors, len(example_points), shape)[0]
+                    # print("Backbone PySCN")
+                    if args.verbose:
+                        x_org = model.backbone(voxels, coors, len(example_points), shape)[0]
                     
-                    voxels = voxels.cpu().numpy()
-                    coors = coors.cpu().numpy()
-                    shape = shape.tolist()
-                    x_opt = backbone_model.forward(voxels, coors, [41,1440,1440], 0)[0]
-                    x = torch.from_numpy(x_opt).to(dtype=torch.float32).cuda()
+                    voxels = voxels.detach().cpu().to(dtype=torch.float16).numpy()
+                    # voxels = voxels.astype(np.float16)  # (70353, 5)
+                    coors = coors.detach().cpu().to(dtype=torch.int32).numpy()
+                    # coors = coors.astype(np.int32)      # (70353, 4)
+                    shape = shape.tolist()              # [1440, 1440, 40]
+                    x_opt = backbone_model.forward(voxels, coors, [41,1440,1440], 0)[0]   # (1, 256, 180, 180)
+                    if args.verbose:
+                        diff(x_org, x_opt)
+
+                    # Two way for dtype conversion, both demonstrating equivalent accuracy
+                    # x = torch.from_numpy(x_opt).to(dtype=torch.float32).cuda()
+                    x = torch.from_numpy(x_opt.astype(np.float32)).cuda()
+                    # print(f"x_opt:{x_opt.dtype} x:{x.dtype}")
                 else:
-                    x = model.backbone(voxels, coors, len(example_points), shape)[0]
+                    # print("Backbone Torch")
+                    x = model.backbone(voxels, coors, len(example_points), shape)[0]        # [1, 256, 180, 180]
             
             if args.model_type == "baseline":
                 out_dict_list = model.neck(x)
-            else: # poolformer
+            elif args.model_type == "poolformer":
                 with nvtx.annotate("find_centers"): 
                     if args.trt:
-                        if args.trt_fp16:
-                            x = x.to(dtype=torch.half)
+                        if args.verbose:
+                            x_org = x.clone().detach()
+                        # print(f"input tensor(SCN) type: {x.dtype}")
+                        ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = create_output_tensor(num_tasks, batch_size, obj_num, num_input_features)
                         IO_tensors = {
                             "inputs" :
                             {
@@ -210,10 +231,16 @@ def main():
                             }
                         }
                         run_trt_engine(cf_context, cf_engine, IO_tensors)
-                        if args.trt_fp16:
-                            ct_feat = ct_feat.to(dtype=torch.float32)
-                            center_pos_embedding = center_pos_embedding.to(dtype=torch.float32)
-                            out_scores = out_scores.to(dtype=torch.float32)
+                        
+                        if args.verbose:
+                            ct_feat_org, center_pos_embedding_org, out_scores_org, out_labels_org, out_orders_org, out_masks_org = model.neck.find_centers(x_org)
+                            diff(ct_feat_org, ct_feat.clone().detach().cpu().numpy())
+                            diff(center_pos_embedding_org, center_pos_embedding.clone().detach().cpu().numpy())
+                            diff(out_scores_org, out_scores.clone().detach().cpu().numpy())
+                            diff(out_labels_org, out_labels.clone().detach().cpu().numpy())
+                            diff(out_orders_org, out_orders.clone().detach().cpu().numpy())
+                            diff(out_masks_org, out_masks.clone().detach().cpu().numpy())
+
                     elif args.mem_opt:
                         ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = model.neck.find_centers(x)
                     else:
@@ -279,6 +306,61 @@ def main():
 
     # print("evaluation")
     # result_dict, _ = dataset.evaluation(copy.deepcopy(predictions), output_dir=args.work_dir, testset=args.testset)
+
+def diff(torch_tensor, cpp_tensor):
+    cpp_shape    = ' x '.join(map(str, cpp_tensor.shape))
+    torch_shape  = ' x '.join(map(str, torch_tensor.shape))
+    print("================ Compare Information =================")
+    print(f" CPP     Tensor: {cpp_shape}, {cpp_tensor.dtype}")
+    print(f" PyTorch Tensor: {torch_shape}, {torch_tensor.dtype}")
+
+    if np.cumprod(cpp_tensor.shape)[-1] != np.cumprod(torch_tensor.shape)[-1]:
+        raise RuntimeError(f"Invalid compare with mismatched shape, {cpp_shape} < ----- > {torch_shape}")
+
+    cpp_tensor   = cpp_tensor.reshape(-1).astype(np.float32)
+    torch_tensor = torch_tensor.detach().cpu().numpy().reshape(-1).astype(np.float32)
+
+    diff        = np.abs(cpp_tensor - torch_tensor)
+    absdiff_max = diff.max().item()
+    print(f"\033[31m[absdiff]: max:{absdiff_max}, sum:{diff.sum().item():.6f}, std:{diff.std().item():.6f}, mean:{diff.mean().item():.6f}\033[0m")
+    print(f"CPP:   absmax:{np.abs(cpp_tensor).max().item():.6f}, min:{cpp_tensor.min().item():.6f}, std:{cpp_tensor.std().item():.6f}, mean:{cpp_tensor.mean().item():.6f}")
+    print(f"Torch: absmax:{np.abs(torch_tensor).max().item():.6f}, min:{torch_tensor.min().item():.6f}, std:{torch_tensor.std().item():.6f}, mean:{torch_tensor.mean().item():.6f}")
+    
+    absdiff_p75 = absdiff_max * 0.75
+    absdiff_p50 = absdiff_max * 0.50
+    absdiff_p25 = absdiff_max * 0.25
+    numel       = cpp_tensor.shape[0]
+    num_p75     = np.sum(diff > absdiff_p75)
+    num_p50     = np.sum(diff > absdiff_p50)
+    num_p25     = np.sum(diff > absdiff_p25)
+    num_p00     = np.sum(diff > 0)
+    num_eq00    = np.sum(diff == 0)
+    print(f"[absdiff > m75% --- {absdiff_p75:.6f}]: {num_p75 / numel * 100:.3f} %, {num_p75}")
+    print(f"[absdiff > m50% --- {absdiff_p50:.6f}]: {num_p50 / numel * 100:.3f} %, {num_p50}")
+    print(f"[absdiff > m25% --- {absdiff_p25:.6f}]: {num_p25 / numel * 100:.3f} %, {num_p25}")
+    print(f"[absdiff > 0]: {num_p00 / numel * 100:.3f} %, {num_p00}")
+    print(f"[absdiff = 0]: {num_eq00 / numel * 100:.3f} %, {num_eq00}")
+
+    cpp_norm   = np.linalg.norm(cpp_tensor)
+    torch_norm = np.linalg.norm(torch_tensor)
+    sim        = (np.matmul(cpp_tensor, torch_tensor) / (cpp_norm * torch_norm))
+    print(f"[cosine]: {sim * 100:.3f} %")
+    print("======================================================")
+    return
+
+def create_output_tensor(num_tasks, batch_size, obj_num, num_input_features, trt_fp16=False):
+    out_labels = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
+    out_orders = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.int32).cuda()
+    out_masks = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.bool).cuda()
+    if trt_fp16:
+        ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float16).cuda()
+        center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float16).cuda()
+        out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float16).cuda()
+    else:
+        ct_feat = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
+        center_pos_embedding = torch.zeros((batch_size, num_tasks*obj_num, num_input_features), dtype=torch.float32).cuda()
+        out_scores = torch.zeros((num_tasks, batch_size, obj_num), dtype=torch.float32).cuda()
+    return ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks
 
 if __name__ == "__main__":
     main()

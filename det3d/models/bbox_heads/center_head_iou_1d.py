@@ -323,7 +323,7 @@ class CenterHeadIoU_1d(nn.Module):
         return rets_merged
 
     @torch.no_grad()
-    def predict(self, example_metadata, preds_dicts, test_cfg, **kwargs):
+    def predict(self, example_metadata, preds_dicts, test_cfg):
         """decode, nms, then return the detection result. Additionaly support double flip testing"""
         # get loss info
         rets = []
@@ -338,8 +338,11 @@ class CenterHeadIoU_1d(nn.Module):
         
         to_device = preds_dicts[0]["scores"].device
         batch, obj_num = preds_dicts[0]["scores"].size()
-        H = 360
-        W = 360
+        # Dynamically calculate heatmap size. nusc H, W = 360, 360. waymo H, W = 376, 376.
+        H = abs(test_cfg["pc_range"][0])*2//test_cfg["voxel_size"][0]//test_cfg["out_size_factor"] # 360, 376
+        W = abs(test_cfg["pc_range"][1])*2//test_cfg["voxel_size"][1]//test_cfg["out_size_factor"] # 360, 376
+        H, W = int(H), int(W)
+        # print(f"H:{H}, W:{W}")
         ys, xs = torch.meshgrid([torch.arange(0, H, device=to_device), torch.arange(0, W, device=to_device)])
         ys = ys.view(1, H, W).repeat(batch, 1, 1)
         xs = xs.view(1, H, W).repeat(batch, 1, 1)
@@ -368,17 +371,6 @@ class CenterHeadIoU_1d(nn.Module):
                 batch_iou = torch.clamp(batch_iou, min=0.0, max=1.0)
             else:
                 batch_iou = None
-
-            # TODO: Address poolformer compatibility
-            # The current implementation seamlessly integrates with tools/eval_models.py,
-            # where predict_baseline is explicitly invoked.
-            # However, issues may arise when employing tools/dist_test.py.
-            # To ensure compatibility, consider modifying the code to explicitly call predict_baseline
-            # at line 43 in det3d/models/detectors/voxelnet_dynamic.py.
-            batch, _, H, W = preds_dict["hm"].size()
-            ys, xs = torch.meshgrid([torch.arange(0, H), torch.arange(0, W)])
-            ys = ys.view(1, H, W).repeat(batch, 1, 1).to(to_device)
-            xs = xs.view(1, H, W).repeat(batch, 1, 1).to(to_device)
 
             xs_2 = (
                 xs.view(batch, -1, 1)[batch_id, preds_dict["order"]]

@@ -16,7 +16,7 @@ export CUMM_CUDA_ARCH_LIST="8.7"
 mkdir dependencies
 cd dependencies
 # intstall cumm & spconv
-git clone -b tag/v0.4.11 https://github.com/FindDefinition/cumm
+git clone -b v0.4.11 https://github.com/FindDefinition/cumm
 cd cumm/
 pip install -e .
 cd ..
