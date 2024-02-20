@@ -10,4 +10,6 @@ nvtx
 onnx
 pandas
 torchvision==0.15.1
-# tensorrt==8.5.1.7                                                                   
+--find-links https://data.pyg.org/whl/torch-2.1.0+cu118.html
+torch-scatter
+# tensorrt==8.5.1.7

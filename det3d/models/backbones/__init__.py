@@ -6,4 +6,9 @@ if found:
     from .scn import SpMiddleResNetFHD
 else:
     print("No spconv, sparse convolution disabled!")
+from .dsvt import DSVT
 
+__all__ = [
+    "SpMiddleResNetFHD",
+    "DSVT",
+]

@@ -9,6 +9,7 @@ __all__ = [
     "BaseDetector",
     "SingleStageDetector",
     "VoxelNet",
+    "poolnet",
     "PointPillars",
     'VoxelNet_dynamic',
 ]

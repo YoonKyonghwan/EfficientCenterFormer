@@ -1,6 +1,6 @@
 import argparse
 import json
-import os
+import os; os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' # disable tensorflow info, warning.
 import sys
 
 from numba.core.errors import NumbaDeprecationWarning, NumbaPendingDeprecationWarning, NumbaWarning

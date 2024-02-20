@@ -903,7 +903,7 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             out_dict_list.append(out_dict)
         return out_dict_list
 
-    def forward(self, x, example=None):        
+    def forward_infer(self, x, example=None):        
         ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks = self.find_centers(x)
         out_dict_list = self.poolformer(ct_feat, center_pos_embedding, out_scores, out_labels, out_orders, out_masks)
         return out_dict_list
@@ -931,7 +931,6 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             scores, labels = torch.max(hm.reshape(batch, num_cls, H * W), dim=1)  # b,H*W
 
             if self.use_gt_training and self.hm_heads[0].training:
-                print("Not entered while infer")
                 gt_inds = example["ind"][idx][:, (self.window_size // 2) :: self.window_size]
                 gt_masks = example["mask"][idx][
                     :, (self.window_size // 2) :: self.window_size
@@ -1030,8 +1029,8 @@ class RPN_poolformer_multitask(RPN_transformer_base_multitask):
             out_dict_list[idx]["ct_feat"] = poolformer_output[:, :, idx * self.obj_num : (idx+1) * self.obj_num]
         return out_dict_list
     
-    def forward_baseline(self, x, example=None):
+    def forward(self, x, example=None):
         # You should use this function while training
-        ct_feat, center_pos_embedding, out_dict_list = self.find_centers_baseline(x)
+        ct_feat, center_pos_embedding, out_dict_list = self.find_centers_baseline(x, example)
         out_dict_list = self.poolformer_baseline(ct_feat, center_pos_embedding, out_dict_list)
         return out_dict_list
