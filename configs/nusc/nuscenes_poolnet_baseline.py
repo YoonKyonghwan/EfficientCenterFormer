@@ -74,8 +74,8 @@ model = dict(
     neck=dict(
         type="RPN_poolformer_multitask",
         layer_nums=[5, 5, 1],
-        ds_num_filters=[128, 128, 64],
-        num_input_features=128,
+        ds_num_filters=[256, 256, 128],
+        num_input_features=256,
         tasks=tasks,
         use_gt_training=True,
         corner = True,
@@ -112,7 +112,7 @@ model = dict(
     # ),
     bbox_head=dict(
         type="CenterHeadIoU_1d",
-        in_channels=128,
+        in_channels=256,
         tasks=tasks,
         dataset='nuscenes',
         weight=0.25,
@@ -152,7 +152,7 @@ test_cfg = dict(
     ),
     score_threshold=0.03,
     pc_range=[-54, -54],
-    out_size_factor=4,
+    out_size_factor=1,
     voxel_size=[0.3, 0.3],
     obj_num= 500,
 )
