@@ -692,9 +692,9 @@ class RPN_transformer_deformable_multitask(RPN_transformer_base_multitask):
             # run transformer
             src = torch.cat(
                 (
-                    x_up.reshape(batch, -1, H * W).transpose(2, 1).contiguous(),
-                    x.reshape(batch, -1, (H * W) // 4).transpose(2, 1).contiguous(),
-                    x_down.reshape(batch, -1, (H * W) // 16)
+                    x_up.reshape(batch, -1, H * W).transpose(2, 1).contiguous(),        # 1, 180**2, 256 / H, W = 180, 180
+                    x.reshape(batch, -1, (H * W) // 4).transpose(2, 1).contiguous(),    # 1, 90**2, 128 / H, W = 90, 90
+                    x_down.reshape(batch, -1, (H * W) // 16)                            # 1, 90**2, 256  / H, W = 90, 90
                     .transpose(2, 1)
                     .contiguous(),
                 ),

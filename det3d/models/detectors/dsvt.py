@@ -1,8 +1,11 @@
-from ..registry import DETECTORS
+import torch
+
 from .detector3d_template import Detector3DTemplate
+from ..backbones.map_to_bev.pointpillar3d_scatter import PointPillarScatter3d
+from ..registry import DETECTORS
 
 
-@DETECTOR.register_module
+@DETECTORS.register_module
 class DSVT(Detector3DTemplate):
     def __init__(
         self,
@@ -15,18 +18,12 @@ class DSVT(Detector3DTemplate):
         test_cfg=None,
         pretrained=None,
     ):
-        super().__init__(model_cfg=model_cfg, num_class=num_class, dataset=dataset)
-        super(PoolNet, self).__init__(
-            reader, backbone, neck, bbox_head, train_cfg, test_cfg, pretrained
+        super(DSVT, self).__init__(
+            reader, backbone, map_to_bev, neck, bbox_head, train_cfg, test_cfg, pretrained
         )
         # TODO make builder
-        self.map_to_bev = PointPillarScatter3d(
-            model_cfg=SimpleNamespace(
-                INPUT_SHAPE=[360, 360, 1],
-                NUM_BEV_FEATURES=128,
-            ),
-            grid_size=[360, 360, 1],
-        )
+        del map_to_bev["type"]
+        self.map_to_bev = PointPillarScatter3d(**map_to_bev)
 
     def extract_feat(self, example):
         # convert list([x, y, z, i, e]) to tensor(batch_idx, x, y, z, i, e)
@@ -44,19 +41,19 @@ class DSVT(Detector3DTemplate):
         del points
 
         example = self.reader(example)
-        example = self.backbone(example)  # [2, 128, 360, 360]
+        example = self.backbone(example)    # [2, 128, 360, 360]
         example = self.map_to_bev(example)  # [2, 128, 360, 360]
+        # x = example["spatial_features"]
 
         if self.with_neck:
-            # [2, 256, 180, 180] [batch, num_input_features, x, y]
-            x = self.neck(x, example)
+            x = self.neck(example)
 
         return x
 
-    def forward(self, batch_dict):
+    def forward(self, example, return_loss=False):
         x = self.extract_feat(example)
 
-        preds = self.bbox_head(x)
+        preds = self.bbox_head(x)           # [1, 128, 360, 360] 'spatial_features_2d'
         if return_loss:
             return self.bbox_head.loss(example, preds, self.test_cfg)
         else:
