@@ -32,10 +32,10 @@ class PoolNet(SingleStageDetector):
         )
         # pool_size = 3
         # self.downsample = torch.nn.AvgPool2d(pool_size, stride=2, padding=pool_size//2, count_include_pad=False)
-        self.downsample = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1),
-            torch.nn.ReLU(),
-        )
+        # self.downsample = torch.nn.Sequential(
+        #     torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1),
+        #     torch.nn.ReLU(),
+        # )
         
         
     def extract_feat(self, example):
@@ -53,7 +53,7 @@ class PoolNet(SingleStageDetector):
         example = self.backbone(example)  # [2, 128, 360, 360]
         example = self.map_to_bev(example)# [2, 128, 360, 360]
         x = example["spatial_features"]   # [2, 128, 360, 360] [batch, NUM_BEV_FEATURES, x, y]
-        x = self.downsample(x)            # [2, 256, 180, 180]
+        # x = self.downsample(x)            # [2, 256, 180, 180]
         
         if self.with_neck:
             x = self.neck(x, example)   # [1, 256, 180, 180] [batch, num_input_features, x, y]

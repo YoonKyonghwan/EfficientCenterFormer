@@ -1,6 +1,6 @@
 import torch
 from scipy.optimize import linear_sum_assignment
-from pcdet.ops.iou3d_nms import iou3d_nms_cuda
+from det3d.ops.iou3d_nms import iou3d_nms_cuda
 
 
 def height_overlaps(boxes1, boxes2):
