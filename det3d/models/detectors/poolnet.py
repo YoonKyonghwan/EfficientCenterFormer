@@ -31,12 +31,21 @@ class PoolNet(SingleStageDetector):
             grid_size=[360, 360, 1],
         )
         # pool_size = 3
+        # exp1
         # self.downsample = torch.nn.AvgPool2d(pool_size, stride=2, padding=pool_size//2, count_include_pad=False)
+        # exp2
         # self.downsample = torch.nn.Sequential(
         #     torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1),
         #     torch.nn.ReLU(),
         # )
-        
+        # exp3
+        # self.downsample = torch.nn.Sequential(
+        #     torch.nn.Conv2d(in_channels=128, out_channels=8, kernel_size=1, stride=1, bias=False),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Conv2d(in_channels=8, out_channels=256, kernel_size=3, stride=2, padding=1, bias=False),
+        # )
+        # exp4
+        # no downsample
         
     def extract_feat(self, example):
         points = []
