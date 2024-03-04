@@ -7,6 +7,59 @@ from .single_stage import SingleStageDetector
 from torch.cuda.amp import autocast as autocast
 
 
+class DownSampleBlock(torch.nn.Module):
+    def __init__(self, num_layer=3):
+        super(DownSampleBlock, self).__init__()
+        self.block0 = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=2, padding=1, bias=False),
+            torch.nn.BatchNorm2d(256),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1, bias=False),
+            torch.nn.BatchNorm2d(256),
+        )
+        self.downsample = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=1, stride=1, bias=False),
+            torch.nn.BatchNorm2d(256),
+        )
+        self.relu = torch.nn.ReLU()
+        for i in range(num_layer):
+            setattr(self, f"block{i+1}", self._block())
+
+
+    def _block(self):
+        block = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1, bias=False),
+            torch.nn.BatchNorm2d(256),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, stride=1, padding=1, bias=False),
+            torch.nn.BatchNorm2d(256),
+        )
+        return block
+
+    def forward(self, x):
+        identity = x
+        out = self.block0(x)
+        identity = self.downsample(x)
+        out += identity
+        x = self.relu(out)
+
+        identity = x 
+        out = self.block1(x)
+        out += identity
+        x = self.relu(out)
+
+        identity = x 
+        out = self.block2(x)
+        out += identity
+        x = self.relu(out)
+
+        identity = x 
+        out = self.block3(x)
+        out += identity
+        x = self.relu(out)
+        return x
+
+
 @DETECTORS.register_module
 class PoolNet(SingleStageDetector):
     def __init__(
@@ -38,7 +91,7 @@ class PoolNet(SingleStageDetector):
         #     torch.nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1),
         #     torch.nn.ReLU(),
         # )
-        # exp3
+        # exp3, exp5
         # self.downsample = torch.nn.Sequential(
         #     torch.nn.Conv2d(in_channels=128, out_channels=8, kernel_size=1, stride=1, bias=False),
         #     torch.nn.ReLU(),
@@ -46,6 +99,9 @@ class PoolNet(SingleStageDetector):
         # )
         # exp4
         # no downsample
+        # exp6
+        self.downsample = DownSampleBlock()
+
         
     def extract_feat(self, example):
         points = []
@@ -62,7 +118,7 @@ class PoolNet(SingleStageDetector):
         example = self.backbone(example)  # [2, 128, 360, 360]
         example = self.map_to_bev(example)# [2, 128, 360, 360]
         x = example["spatial_features"]   # [2, 128, 360, 360] [batch, NUM_BEV_FEATURES, x, y]
-        # x = self.downsample(x)            # [2, 256, 180, 180]
+        x = self.downsample(x)            # [2, 256, 180, 180]
         
         if self.with_neck:
             x = self.neck(x, example)   # [1, 256, 180, 180] [batch, num_input_features, x, y]

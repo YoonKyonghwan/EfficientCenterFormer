@@ -37,9 +37,12 @@ python setup.py build_ext --inplace
 cd ../.. && cd models/ops/
 python setup.py build install
 
+cd ../../..
+python det3d/ops/setup.py develop
+
 # set environment variables
 export PYTHONPATH=$PYTHONPATH:$(pwd)
-export PYTHONPATH=$PYTHONPATH:$(pwd)/dependencies/Lidar_AI_Solution/libraries/3DSparseConvolution/tool # for OPT_3D_backbone
+export PYTHONPATH=$PYTHONPATH:$(pwd)/deps/Lidar_AI_Solution/libraries/3DSparseConvolution/tool # for OPT_3D_backbone
 export PATH=$PATH:/usr/local/cuda/bin
 export CUDA_PATH=/usr/local/cuda
 export CUDA_HOME=/usr/local/cuda
