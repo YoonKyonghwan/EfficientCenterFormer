@@ -92,7 +92,7 @@ class RPN_transformer_base_multitask(nn.Module):
         **kwargs
     ):
         super(RPN_transformer_base_multitask, self).__init__()
-        self._layer_strides = [2, 2, -4] # TMP
+        self._layer_strides = [1, 2, -4] # TMP
         self._num_filters = ds_num_filters
         self._layer_nums = layer_nums
         self._num_input_features = num_input_features
