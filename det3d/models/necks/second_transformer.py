@@ -1,6 +1,7 @@
 import torch
+import numpy as np
 
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import functional as F
 
 from det3d.torchie.cnn import xavier_init
@@ -90,6 +91,7 @@ class SECOND_transformer_multitask(nn.Module):
         init_bias=-2.19,
         score_threshold=0.1,
         obj_num=500,
+        parametric_embedding=False,
         **kwargs
     ):
         super(SECOND_transformer_multitask, self).__init__()
@@ -144,7 +146,7 @@ class SECOND_transformer_multitask(nn.Module):
             for i in range(hm_head_layer - 1):
                 hm_head.add(
                     nn.Conv2d(
-                        self._num_filters[-1] * 2,
+                        384, # self._num_filters[-1] * 2,
                         64,
                         kernel_size=3,
                         stride=1,
@@ -168,7 +170,7 @@ class SECOND_transformer_multitask(nn.Module):
             for i in range(corner_head_layer - 1):
                 corner_head.add(
                     nn.Conv2d(
-                        self._num_filters[-1] * 2,
+                        384, # self._num_filters[-1] * 2,
                         64,
                         kernel_size=3,
                         stride=1,
@@ -207,7 +209,7 @@ class SECOND_transformer_multitask(nn.Module):
             self.pos_embedding = None
         else:
             raise NotImplementedError()
-        self.cross_attention_kernel_size = transformer_config.cross_attention_kernel_size
+        # self.cross_attention_kernel_size = transformer_config.cross_attention_kernel_size
         self.parametric_embedding = parametric_embedding
         if self.parametric_embedding:
             self.query_embed = nn.Embedding(self.obj_num * len(self.tasks), self._num_filters[-1] * 2)
