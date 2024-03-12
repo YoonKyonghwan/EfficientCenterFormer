@@ -91,7 +91,6 @@ class SECOND_transformer_multitask(nn.Module):
         init_bias=-2.19,
         score_threshold=0.1,
         obj_num=500,
-        parametric_embedding=False,
         **kwargs
     ):
         super(SECOND_transformer_multitask, self).__init__()
@@ -106,7 +105,8 @@ class SECOND_transformer_multitask(nn.Module):
         self.obj_num = obj_num
         self.use_gt_training = use_gt_training
         self.window_size = assign_label_window_size**2
-        self.cross_attention_kernel_size = [3, 3, 3]
+        # self.cross_attention_kernel_size = [3, 3, 3] # FIX
+        self.cross_attention_kernel_size = [3] # FIX
         self.batch_id = None
         self.tasks = tasks
 
@@ -189,7 +189,7 @@ class SECOND_transformer_multitask(nn.Module):
         
         # Transformer
         self.transformer_layer = Transformer(
-            self._num_filters[-1] * 2,
+            384, # self._num_filters[-1] * 2,
             depth=transformer_config.depth,
             heads=transformer_config.heads,
             dim_head=transformer_config.dim_head,
@@ -202,7 +202,7 @@ class SECOND_transformer_multitask(nn.Module):
         )
         if self.pos_embedding_type == "linear":
             if len(self.tasks)>1:
-                self.pos_embedding = nn.Linear(3, self._num_filters[-1] * 2)
+                self.pos_embedding = nn.Linear(3, 384) # self._num_filters[-1] * 2)
             else:
                 self.pos_embedding = nn.Linear(2, self._num_filters[-1] * 2)
         elif self.pos_embedding_type == "none":
@@ -210,10 +210,6 @@ class SECOND_transformer_multitask(nn.Module):
         else:
             raise NotImplementedError()
         # self.cross_attention_kernel_size = transformer_config.cross_attention_kernel_size
-        self.parametric_embedding = parametric_embedding
-        if self.parametric_embedding:
-            self.query_embed = nn.Embedding(self.obj_num * len(self.tasks), self._num_filters[-1] * 2)
-            nn.init.uniform_(self.query_embed.weight, -1.0, 1.0)
 
         logger.info("Finish second_transformer Initialization")
 
@@ -260,7 +256,7 @@ class SECOND_transformer_multitask(nn.Module):
         x_down1 = self.blocks[1](x) # B * 128 * 180 * 180
         x_down1_deb = self.deblocks[1](x_down1)
 
-        x_down2 = self.blocks[2](x_down1) # B * 128 * 90 * 90
+        x_down2 = self.blocks[2](x_down1) # B * 256 * 90 * 90
         x_down2_deb = self.deblocks[2](x_down2)
         
         x_up = torch.cat([x_deb, x_down1_deb, x_down2_deb], dim=1)
@@ -332,49 +328,26 @@ class SECOND_transformer_multitask(nn.Module):
         
         # create position embedding for each center
         y_coor = order_all // W
-        x_coor = order_all - y_coor * W
-        y_coor, x_coor = y_coor.to(ct_feat), x_coor.to(ct_feat)
-        y_coor, x_coor = y_coor / H, x_coor / W
+        x_coor = order_all % W
         pos_features = torch.stack([x_coor, y_coor], dim=2)
 
-        if self.parametric_embedding:
-            ct_feat = self.query_embed.weight
-            ct_feat = ct_feat.unsqueeze(0).expand(batch, -1, -1)
-
         # run transformer
-        src = torch.cat(
-            (
-                x_up.reshape(batch, -1, H * W).transpose(2, 1).contiguous(),        # 1, 180**2, 256 / H, W = 180, 180
-                x.reshape(batch, -1, (H * W) // 4).transpose(2, 1).contiguous(),    # 1, 90**2, 128 / H, W = 90, 90
-                x_down.reshape(batch, -1, (H * W) // 16)                            # 1, 90**2, 256  / H, W = 90, 90
-                .transpose(2, 1)
-                .contiguous(),
-            ),
-            dim=1,
-        )  # B ,sum(H*W), C
-        spatial_shapes = torch.as_tensor(
-            [(H, W), (H // 2, W // 2), (H // 4, W // 4)],
-            dtype=torch.long,
-            device=ct_feat.device,
-        )
-        level_start_index = torch.cat(
-            (
-                spatial_shapes.new_zeros((1,)),
-                spatial_shapes.prod(1).cumsum(0)[:-1],
-            )
+        neighbor_feat, neighbor_pos = self.get_multi_scale_feature(
+            pos_features, [x_up] # FIX
         )
 
         if len(self.tasks) > 1:
-            task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(pos_features) # B, 500
+            task_ids = torch.repeat_interleave(torch.arange(len(self.tasks)).repeat(batch,1), self.obj_num, dim=1).to(neighbor_pos) # B, 500
+            neighbor_task_ids = task_ids.unsqueeze(2).repeat(1, 1, neighbor_pos.shape[2]) # B, 500, K
             pos_features = torch.cat([pos_features, task_ids[:, :, None]],dim=-1)
+            neighbor_pos = torch.cat([neighbor_pos, neighbor_task_ids[:, :, :, None]],dim=-1)
 
         transformer_out = self.transformer_layer(
             ct_feat,
-            self.pos_embedding,
-            src,
-            spatial_shapes,
-            level_start_index,
-            center_pos=pos_features,
+            pos_embedding=self.pos_embedding,
+            center_pos=pos_features.to(ct_feat),
+            y=neighbor_feat,
+            neighbor_pos=neighbor_pos.to(ct_feat),
         )  # (B,N,C)
 
         ct_feat = (
@@ -426,7 +399,7 @@ class SECOND_transformer_multitask(nn.Module):
             # selected_feat = torch.gather(feats[i].reshape(batch, num_cls,(H*W)//(4**i)).permute(0, 2, 1).contiguous(),1,feat_id)
             selected_feat = (
                 feats[i]
-                .reshape(batch, num_cls, (H * W) // (4**i))
+                .reshape(batch, num_cls, (H * W) ) # FIX
                 .permute(0, 2, 1)
                 .contiguous()[self.batch_id.repeat(1, k**2), feat_id]
             )  # B, 500*k, C
